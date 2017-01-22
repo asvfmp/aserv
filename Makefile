@@ -15,8 +15,8 @@ EXECUTABLE=ioa
 #.c.o:                                                                                     
 #    $(CC) $(CFLAGS) $< -o $@      
 
-ioa:
-	$(CC) --std=gnu99 -c $(SOURCES)
-	$(CC) $(SOURCES) -o $(EXECUTABLE)
+ioa:	$(OBJECTS)
+#	$(CC) --std=gnu99 -c $(SOURCES)
+	$(CC) $(CFLAGS) $(LDFLAGS) $(OBJECTS) -o $@
 clean:
 	rm -rf *.o $(EXECUTABLE)
