@@ -1,0 +1,99 @@
+#!/bin/bash
+
+remote_SYNC ()
+{
+consoleLog "[$FUNCNAME]: Проверка статуса синхронизации с сервером" $CONS
+############################################# Проверка статуса синхронизации с сервером #################################################################
+port__SW $_conn 2
+rsync -rqztL --copy-unsafe-links --partial --size-only --modify-window=1 --timeout=5 --delete --password-file=/etc/rsyncd.scrt $R_USER@$R_SERV::$R_DIR_state/sync_state $WP/share/remotesync_state
+SYNC_FLAG=`cat $WP/share/remotesync_state`
+rsync -qzt --timeout=5 --password-file=/etc/rsyncd.scrt $WP/share/status $R_USER@$R_SERV::$R_DIR_state/status									# Отправляем файл статуса на удаленный сервер
+port__SW $_conn 1
+if [[ $SYNC_FLAG == "sync" ]]; then consoleLog "[$FUNCNAME]: Локальное хранилище синхронизировано с сервером" $CONS; return 0; fi						# Если синхронизированно состояние - выход
+
+consoleLog "[$FUNCNAME]: Есть новые данные на сервере. Начинаем синхронизацию." $CONS												# Есть данные для синхронизации
+
+#проверяем точки монтирования и наличие накопителя для синхронизации и проигрывания
+echo
+consoleLog "[$FUNCNAME]: Checking of mount point <$SMNT_P> and partition <$SS_LBL> on <$HOST_SRV> for syncing" $SLOG_D $CONS_D
+mount -l |grep $SMNT_P |grep $SS_LBL >/dev/null
+if ! [ $? -eq 0 ]; then
+    ls -l /dev/disk/by-label/ |grep $SS_LBL
+    if ! [ $? -eq 0 ]; then consoleLog "[$FUNCNAME]: ### ERROR ### Device with partition <$SS_LBL> not connected or partition doesn't exist" $CONS $SLOG; return 1; fi;
+    local _part=`ls -l /dev/disk/by-label/ |grep $SS_LBL |sed 's/.*\/sd/\/sd/;s/ .*//'`
+    dosfsck -afVw /dev$_part 1>>$CONS_D
+    if ! [ -d "$SMNT_P" ]; then
+	    mkdir $SMNT_P 1>>$SLOG_D					# Создаем точку монтирования
+    	    mount -L $SS_LBL $SMNT_P 1>>$SLOG_D				# Монтируем хранилище
+	else
+            mount -L $SS_LBL $SMNT_P 1>>$SLOG_D				# Монтируем хранилище
+    fi
+    else
+	consoleLog "[$FUNCNAME]: ... done." $SLOG_D $CONS_D
+	consoleLog "[$FUNCNAME]: Общий/свободный объем раздела <$SS_LBL> для удаленной синхронизации: `df -h /mnt/audio|awk 'NR==2 {print $2"/"$4}'''`" $CONS
+        mount -l |grep $SMNT_P |grep $SS_LBL 1>>$SLOG_D			# Проверяем и пишем в отладку
+fi
+
+
+# если предыдущие проверки прошли удачно - синхронизируемся
+mount -l |grep $SMNT_P |grep -q $SS_LBL
+
+if [ $? -ne 0 ]; then
+        consoleLog "[$FUNCNAME]: ### ERROR ### Store <$SS_LBL> not mounted or not exist. Exit" $SLOG $CONS
+	return 2
+fi
+################## Ненужная часть #########################################
+#if [ -e $PIDFILE ]; then
+#    consoleLog "[$FUNCNAME]: --------   Already working too hard   --------------" $SLOG $CONS
+#fi
+#############################################################################
+# Проверяем окончание синхронизации с локальным хранилищем
+		    consoleLog "[$FUNCNAME]: Check of end local sync process ..." $CONS $SLOG_D
+		    ps |grep -v 'grep' |grep -q 'syncplay' >/dev/null
+		    until [[ $? = 1 ]]; do
+			sleep 5
+			ps |grep -v 'grep' |grep -q 'syncplay' >/dev/null
+		    done
+		    consoleLog "[$FUNCNAME]: ... done." $CONS $SLOG_D
+
+#            	    touch $PIDFILE
+		    touch $WP/share/out_of_sync																	# Признак рассинхронизации с удаленным сервером (читаем его при инициализации и сбрасываем только после локальной синхронизации)
+
+
+#		    if [[ $A_N_IFACE =~ ^wwan.*$ ]]; then _blnk=CSND; elif [[ $_ifaceup =~ ^wlan.*$ ]]; then _type=Wi-Fi; _blnk=WSND; else _type=LAN; _blnk=ESND; fi;
+            	    consoleLog "[$FUNCNAME]: Starting synchronization with remote host ($R_SERV) by interface <$A_N_IFACE> ($_type)"  $SLOG $CONS
+#		    echo $_blnk
+#            	    sleep 5
+#		    consoleLog "[$FUNCNAME]: Индикатор сетевого соединения <$_conn>, статус 2"  $CONS_D
+            	    port__SW $_conn 2																			# Индикатор в режим передачи/приема
+		    echo performance > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+            	    start=$(date +%s)
+		    printf "\n"
+            	    rsync -rqztL --copy-unsafe-links --partial --size-only --modify-window=1 --timeout=5 --delete --password-file=/etc/rsyncd.scrt $R_USER@$R_SERV::$R_DIR/ $SMNT_P	# Синхронизируем каталог с удаленным сервером
+		    if [[ $? == 0 ]]; then 
+			echo out_of_sync > $WP/share/playsync_state
+		    else
+			consoleLog "[$FUNCNAME]: Неудачная синхронизация." $SLOG $CONS													# Если синхронизировались без ошибок - пишем признак разрешения синхронизации флешки
+		    fi
+############################# Составление списка файлов после синхронизации и отправка на сервер ###############################################################################
+		    pushd $SMNT_P 2>&1 >/dev/null
+		    find . -type f |sed -n 's/.*\///p'>$TMPD/fl
+		    LC_ALL=C sort -d $TMPD/fl >$WP/share/list_fsync
+		    popd 2>&1 >/dev/null
+            	    rsync -qzt --timeout=5 --password-file=/etc/rsyncd.scrt $WP/share/list_fsync $R_USER@$R_SERV::$R_DIR_state/list_fsync_remote					# Отправляем список файлов после синхронизации на сервер
+#            	    rsync -qzt --timeout=5 --password-file=/etc/rsyncd.scrt $WP/share/status $R_USER@$R_SERV::$R_DIR_state/status							# Отправляем файл статуса на удаленный сервер
+################################################################################################################################################################################
+		    echo powersave > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+# Тут будем обновлять софт и конфигурационные файлы
+		    rsync -rqzt --delete --port=8730 --password-file=/etc/rsync.scrt $R_USER@$R_SERV::$R_PKG/ $PKG_H 2>&1 > /var/log/rsync.log						# Синхронизируем пакет и настройки
+
+            	    end=$(date +%s)
+		    port__SW $_conn 1
+#            	    rm $PIDFILE
+            	    printf "\n-----------------------------------------------------------------------\n\n" 1>>$SLOG>>$CONS
+		    printf "Download time: %.2d:%.2d:%.2d\n" $(( (end -= start) / 3600 )) $(( (end %= 3600) / 60 )) $(( end %= 60 )) 1>>$SLOG>>$CONS
+            	    printf "\n-----------------------------------------------------------------------\n\n" 1>>$SLOG>>$CONS
+#		    consoleLog "[$FUNCNAME]: Индикатор сетевого соединения <$_conn>, статус 1"  $CONS_D
+		    consoleLog "[$FUNCNAME]: Общий/свободный объем раздела <$SS_LBL> после удаленной синхронизации: `df -h /mnt/audio|awk 'NR==2 {print $2"/"$4}'''`" $CONS
+echo
+}

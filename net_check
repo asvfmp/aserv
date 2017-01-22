@@ -1,0 +1,285 @@
+#!/bin/bash
+# Check network interfaces is UP state and list active interfaces
+check_MDM ()
+{
+modem=`mmcli -L | sed -n 's/.*\/Modem\///;s/ \[.*//p'`
+mdmstate=`mmcli -m 0 |grep "  state:"|sed 's/.*|.*  state: \x27//;s/\x27//'`
+mdmtech=`mmcli -m 0 |grep "access tech:"|sed 's/.*access tech: \x27//;s/\x27//'`
+mdm_sig=`mmcli -m 0 |sed -n 's/.*signal quality: \x27//;s/\x27 .*//p'`
+consoleLog "[$FUNCNAME]: --------------------------------------------" $SLOG_D $CONS
+consoleLog "[$FUNCNAME]: Modem number:..........................$modem" $SLOG_D $CONS
+consoleLog "[$FUNCNAME]: Modem state:...........................$mdmstate" $SLOG_D $CONS
+consoleLog "[$FUNCNAME]: Current modem technology connection:...$mdmtech" $SLOG_D $CONS
+consoleLog "[$FUNCNAME]: Modem signal quality:..................$mdm_sig" $SLOG_D $CONS
+consoleLog "[$FUNCNAME]: --------------------------------------------" $SLOG_D $CONS
+sed -i '/S_LEVEL/s/=.*/='$mdm_sig'/g' $WP/share/status											# Уровень сигнала в файл статуса
+}
+
+
+check_WIFI ()
+{
+wlan_SSID=`iw dev wlan0 link |sed -n 's/.*SSID: //p'`
+wlan_sig=`iw dev wlan0 link |sed -n 's/.*signal: //p'`
+wlan_frq=`iw dev wlan0 link |sed -n 's/.*freq: //p'`
+wlan_txrate=`iw dev wlan0 link |sed -n 's/.*bitrate: //p'`
+consoleLog "[$FUNCNAME]: --------------------------------------------" $SLOG_D $CONS
+consoleLog "[$FUNCNAME]: Access point SSID:..............$wlan_SSID" $SLOG_D $CONS
+consoleLog "[$FUNCNAME]: Signal strenght:................$wlan_sig" $SLOG_D $CONS
+consoleLog "[$FUNCNAME]: Frequency band:.................$wlan_frq" $SLOG_D $CONS
+consoleLog "[$FUNCNAME]: Transmission bitrate:...........$wlan_txrate" $SLOG_D $CONS
+consoleLog "[$FUNCNAME]: --------------------------------------------" $SLOG_D $CONS
+sed -i '/S_LEVEL/s/=.*/='$wlan_sig'/g' $WP/share/status											# Уровень сигнала в файл статуса
+}
+
+
+check_IFACE ()
+{
+    local i=0
+    for (( i=1; i<3; i++ ))
+	do
+	    ping -I $1 -c 1 -q 8.8.8.8 2>&1>/dev/null
+	    if [[ $? -eq "0" ]]; then return 0; fi				# Интерфейс рабочий
+		sleep 1
+	done
+    return 1									# Интерфейс нерабочий
+}
+
+net_IFACE ()
+{
+local __iface_up=$1
+local __gw=$2
+local old__gw=$3
+# Получаем перечень активных интерфейсов
+#local I_FACE_UP=`ip link show up |grep "BROADCAST.*LOWER_UP" |sed -n 's/[0-9]\: //;s/:.*//p'`
+local I_FACE_UP=`ip -4 -o addr|grep -v "inet 127"|sed -n 's/^[0-9]\: //p'|sed -n 's/ .*inet.*//p'`
+
+# здесь проверяем еще и по наличию ipv4 адреса
+#for i in ${I_FACE_UP}
+#do
+#    ip -o -4 addr |grep $i
+#    ifconfig $i|grep inet |sed -n 's/^.*inet[ ].//;s/ netmask.*$//'
+#    if [[ $? -eq "1" ]]; then I_FACE_UP=`echo $I_FACE_UP |sed -e 's/.*\$i.*/ /p'`;fi
+#done
+
+if ! [[ -z $I_FACE_UP && ${I_FACE_UP+x} ]]					# Если они вообще есть (интерфейсы)
+    then
+	local I_FACE_G=$AO_IFACE
+#	local I_FACE_G=$old__gw
+	check_IFACE $I_FACE_G							# Проверяем активный интерфейс на доступность интернета
+	if [[ $? -eq "1" ]]							# Если интернета нет - перебираем оставшиеся активные интерфейсы
+	    then
+		local conn=0
+		for i in ${I_FACE_UP}
+		    do
+			check_IFACE $i
+			if [[ $? -eq "0" ]];then AO_IFACE=$i;I_FACE_G=$i;conn=1;break;fi	# Если нашли рабочий интерфейс - делаем его активным
+		    done
+		if [[ $conn -eq "0" ]]; then
+		    consoleLog "[$FUNCNAME]: ### ERROR <$HOST_SRV> don't have active network interfaces. Check network configuration" $CONS $SLOG
+		    sed -i '/C_STATUS/s/=.*/=disconnected/g' $WP/share/status
+		    return 1							# Уходим с ошибкой если не нашли ни одного рабочего интерфейса
+		fi
+	fi
+#echo "$old__gw."
+#echo "$I_FACE_G."
+	if [[ $old__gw != $I_FACE_G ]]; then					# Перезапускаем iftop при смене активного интерфейса 
+	    su -c "tmux respawn-pane -k -t ASERV:0.0" $USER
+	    su -c "tmux send-keys -t ASERV:0.0 'sudo iftop -i $I_FACE_G' C-m" $USER
+	fi
+	sed -i '/IFACE/s/=.*/='$I_FACE_G'/g' $WP/share/status				# Активный интерфейс в файл статуса
+	sed -i '/C_STATUS/s/=.*/=connected/g' $WP/share/status				# Состояние соединения в файл статуса
+	eval $__iface_up="'$I_FACE_UP'"						# Передаем список интерфейсов
+	eval $__gw="'$I_FACE_G'"						# Передаем активный интерфейс
+	return 0
+    else
+	consoleLog "[$FUNCNAME]: ### ERROR <$HOST_SRV> don't have any active network interfaces. Check network configuration" $CONS $SLOG
+	return 1								# Уходим с ошибкой если не нашли ни одного рабочего интерфейса
+fi
+}
+
+#################################################################################
+# Работа с Connman:	ON	- подключить интерфейс $1			#
+#			OFF	- отключить интерфейс $1			#
+#			STATE	- статус Connman				#
+#			SERV	- перечень доступных сервисов Connman		#
+#			SCAN	- сканирование WiFi				#
+#			ACT	- возвращаем активный интерфейс Connman		#
+#################################################################################
+network_SET ()
+{
+# Проверка на активность процесса синхронизации с удаленным сервером ( может push напишется - тогда проверка будет нужна )
+until [ ! -e $PIDFILE ]; do consoleLog "[$FUNCNAME]: Wait remote synchronization process" $CONS; sleep 2; done
+    if ! [[ $# -eq "1" ]]; then 						# Если параметров больше одного, то в ветку установки соединений
+	local _n_iface=$1							# Назначаем локальные переменные
+	local _sw=$2
+	case "$_sw" in
+	    'ON')
+#set -x
+		ERR_CODE=0
+return 0
+		local _count=0
+		printf "[$(date +'%d-%m-%Y %H:%M:%S')]: [$FUNCNAME]: "
+		nmcli d connect $_n_iface
+		while (( ++_count <= 4 )); do
+		    if [[ `connmanctl services |grep -E '*AO|*AR'|sed -n 's/.* //p'` != "$_n_iface" ]]
+			then consoleLog "[$FUNCNAME]: Wait until Connman set online state service <$_n_iface>" $CONS $SLOG
+			    sleep 10
+			else
+			    return 0	# Ушли с кодом 0 - все удачно
+		    fi
+		done
+#set +x
+		ERR_CODE=1
+		return 1		# Ушли с ошибкой соединения запрошенного сервиса
+	    ;;
+
+	    'OFF')
+return 0
+		printf "[$(date +'%d-%m-%Y %H:%M:%S')]: [$FUNCNAME]: "
+		connmanctl disconnect $_n_iface
+		sleep 2			# здесь бы проверку на отсоединение сервиса ( может Connman завис или ошибка шины сообщений dbus )
+	    ;;
+	esac
+    else							# Если параметр один - сканируем WiFi или определяем активные сервисы или состояние
+	local _sw=$1
+	case "$_sw" in
+
+	    'SCAN')						# Сканируем WiFi сети
+		printf "[$(date +'%d-%m-%Y %H:%M:%S')]: [$FUNCNAME]: "
+		nmcli d wifi rescan
+		sleep 3
+	    ;;
+
+	    'T_ON')						# Включаем тетеринг WiFi
+return 0
+		printf "[$(date +'%d-%m-%Y %H:%M:%S')]: [$FUNCNAME]: "
+		if [[ $AO_IFACE = $WIFI_H ]]; then connmanctl disconnect $WIFI_H; fi;	# Отключаем wifi если подключен
+		printf "[$(date +'%d-%m-%Y %H:%M:%S')]: [$FUNCNAME]: "
+		connmanctl tether wifi on $AP_CAR $AP_CAR_PASS
+		sleep 2
+	    ;;
+
+	    'T_OFF')						# Выключаем тетеринг WiFi 
+return 0
+		printf "[$(date +'%d-%m-%Y %H:%M:%S')]: [$FUNCNAME]: "
+		connmanctl tether wifi off $AP_CAR $AP_CAR_PASS
+		sleep 2
+		printf "[$(date +'%d-%m-%Y %H:%M:%S')]: [$FUNCNAME]: "
+		connmanctl disable wifi					# Тут глюк connman с переходом на wifi после тетеринга. Передергиваем технологию.
+		sleep 5
+		printf "[$(date +'%d-%m-%Y %H:%M:%S')]: [$FUNCNAME]: "
+		connmanctl enable wifi
+		sleep 5
+	    ;;
+
+	    'STATE')
+		if [[ $ACC == "ON" ]]; then local i_wait=4; else i_wait=10;fi	# Сколько ждем установки связи при первом запуске от батареи
+		for (( i=0; i<$i_wait; i++ ))					# Если нужно подождать пока соединится
+		    do
+			if [[ `nmcli g |grep -sq "connected"; echo $?` -eq "0" ]]; then local _cnm=0; break; else local _cnm=1; fi
+			sleep 1
+		    done
+
+		if [[ $_cnm -ne "0" ]]; then return 1; fi			# Возвращаемся с ошибкой если нет соединения у сетевого менеджера
+		for (( i=0; i<10; i++ ))
+		    do
+    			ping -c 1 -q 8.8.8.8 2>&1>/dev/null			# Просто пингуем интерфейс по умолчанию
+			if [[ $? -eq "0" ]]; then return 0; fi			# Возвращаемся если все ок
+			sleep 1
+		    done
+		return 2							# Возврат с ошибкой нерабочего маршрута по умолчанию
+    	    ;;
+	    'SERV')								# Получаем перечень сервисов
+#set -x
+		WIFI_H=""
+		CELL_H=""
+		ETH_H=""
+		nmcli d |grep -sq "wifi.*connected"
+		if [[ $? -eq "0" ]]; then WIFI_H=`nmcli d|grep "wifi.*connected"|sed -n 's/^.*connected //p'`; fi
+		nmcli d |grep -sq "gsm.*connected"
+		if [[ $? -eq "0" ]]; then CELL_H=$CELL; fi
+		nmcli d |grep -sq "ethernet.*connected"
+		if [[ $? -eq "0" ]]; then ETH_H=`nmcli d|grep "ethernet.*connected"|sed -n 's/^.*connected //p'`; fi
+#set +x
+	    ;;
+	    'ACT')								# Получаем активный интерфейс
+		AO_IFACE=
+		T=`ip route list |sed -n 's/^default.*metric //p'`
+		dm=10000
+		for ir in ${T}
+		do
+		    if [ "$ir" -lt "$dm" ]; then dm=$ir;fi
+		done
+		AO_IFACE=`ip route list |grep -E "^default.*metric $dm" |sed -n 's/.*dev //;s/ .*metric.*//p'`
+	esac
+#set +x
+    fi
+    
+}
+
+
+#################################################################################################
+# Вход в основную функцию контроля и установки сетевых соединений				#
+# возвращаем статус сети через return, основной сетевой интерфейс и список активных интерфейсов	#
+#################################################################################################
+
+check_NET ()
+{
+#################### Настройка переменных ###########################################
+
+local CONS=`tty`
+local NET_WAIT=10
+local count
+local _a_iface=$1		# Активный сетевой интерфейс (возвращаемый)
+local _ifaces=$2		# Перечень возвращаемых сетевых интерфейсов
+_O_A_I=$3			# Текущий активный сетевой интерфейс
+local _IFACES
+local _IFACE_UP
+ERR_CODE=0			# Возвращаемый код ошибки 
+######################################################################################
+
+#echo  Вошли
+# Получаем статус сетевого состояния сетевого менеджера соединений
+network_SET STATE
+
+if [[ $? -eq "1" ]]
+    then
+	consoleLog "[$FUNCNAME]: :::WARNING::: $NMAN in not properly state ( may be offline mode ). Check configuration." $CONS $SLOG 
+	port__SW CWOFF
+	return 1										# Выходим по причине ошибки
+    else 
+#	if [[ "$TETH_M" != "ON" ]]; then network_SET SCAN; fi					# Сканируем WiFi если нет тетеринга
+	network_SET SERV									# Получаем перечень доступных сервисов (WiFi and Cellular)
+	if [[ -z $CELL_H ]] && [[ -z $WIFI_H ]] && [[ -z $ETH_H ]]
+	    then consoleLog "[$FUNCNAME]: ###ERROR### Нет текущего известного сетевого сервиса. Соединились с астралом" $CONS $SLOG; return 1; fi
+	network_SET ACT										# Определяем активный сетевой интерфейс через "ip route" и metric
+	if [[ -z $AO_IFACE ]]
+	    then consoleLog "[$FUNCNAME]: ###ERROR### Нет текущего активного сетевого соединения. Проверьте маршруты" $CONS $SLOG;return 1; fi
+fi
+consoleLog "[$FUNCNAME]: Found active network interface. Checking ..." $CONS $SLOG 
+
+net_IFACE _IFACES _IFACE_UP $_O_A_I								# Получаем активные сетевые интерфейсы и проверяем их на доступность
+#net_IFACE _IFACES _IFACE_UP $AO_IFACE								# Получаем активные сетевые интерфейсы и проверяем их на доступность
+if [[ $? -ne 0 ]]; then consoleLog "[$FUNCNAME]: ### ERROR ### Host <$HOST_SRV> don't have correct configured network interfaces" $CONS $SLOG; port__SW CWOFF; return 1;fi
+_IFACE_UP=$AO_IFACE
+consoleLog "[$FUNCNAME]: ...done." $CONS $SLOG 
+
+if [[ $AO_IFACE =~ ^wwan.*$ ]]									# Включаем индикацию на контроллере
+    then port__SW CON 1; port__SW WON 0;check_MDM
+    elif [[ $AO_IFACE =~ ^wlan.*$ ]]
+    then port__SW WON 1; port__SW CON 0;check_WIFI
+    elif [[ $AO_IFACE =~ ^eth.*$ ]]
+    then port__SW EON 1
+    else port__SW CWOFF
+fi
+
+#for i in ${_IFACES}
+#    do 
+#	ping -I $i -c 2 -q 8.8.8.8 2>&1>/dev/null
+#	if ! [[ $? -eq "0" ]]; if [[ $i =~ ^[wwan.*] ]]; then port__SW COFF;nmcli c down gsm; elif [[ $i =~ ^[wlan.*] ]]; then port__SW WOFF;nmcli c down wifi; fi
+#
+
+eval $_a_iface="'$_IFACE_UP'"					# Возвращаем интерфейсы и соединения
+eval $_ifaces="'$_IFACES'"
+
+}

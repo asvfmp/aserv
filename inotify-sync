@@ -1,0 +1,12 @@
+#!/bin/bash
+PID_SYNC_A=/var/run/inotify-sync.pid
+touch $PID_SYNC_A
+echo $$ > $PID_SYNC_A
+trap 'echo "[inotify_w]: Terminate watches by reason: Audio sync server going down by Ctrl-C signal"; exit 1' 2 15
+
+while true
+    do
+#	inotifywait -r -e create -e delete "/home/root" 2>&1 1>/dev/null
+#	/opt/aserv/syncplay
+	inotifywait -rqq -e create,delete,close_write $1 && /bin/bash /opt/aserv/syncplay
+done

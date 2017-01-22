@@ -1,0 +1,18 @@
+#!/bin/bash
+old_IFS=$IFS
+IFS=$'\n'
+for line in $(cat syncaserv.conf)
+    do
+	id=`echo $line |sed -n 's/=.*//p'`
+        case $id in
+        TEST_MODE)
+	    reg_m=`echo $line |sed -n 's/.*=//p'`
+	    TEST_MODE=`echo $reg_m |sed -n 's/ .*//p'`
+        ;;
+        P_SPEED)
+	    reg_m=`echo $line |sed -n 's/.*=//p'`
+	    P_SPEED=`echo $reg_m |sed -n 's/\s.*//p'`
+	esac
+    done
+IFS=$old_IFS
+echo $P_SPEED

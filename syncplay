@@ -1,0 +1,223 @@
+#!/bin/bash
+
+WP=$(cd `dirname $0` && pwd)
+WORKP=$WP
+
+source $WP/syncplay.conf
+source $WP/conlog
+source $WP/portsw
+
+PIDFILE_S=/var/run/syncplay.pid
+CHK_PID=/var/run/rasync.pid
+ACC_CAR=0
+ALOG_D=/var/log/syncplay.log
+HOST_N=`uname -n`
+TMPD=/tmp/aserv
+PID_C_B=/var/run/ioa.pid
+SIGNL="-USR2"
+
+touch $PIDFILE_S
+
+_pr1=$0
+_pr=$(basename $_pr1)
+consoleLog "[$_pr]: Start of local rsync process for USB store <$ST_LBL> on <$HOST_N>" $ALOG $CONS
+old_IFS=$IFS
+IFS=$'\n'
+for line in $(cat syncaserv.conf)
+    do
+	id=`echo $line |sed -n 's/=.*//p'`
+	reg_m=`echo $line |sed -n 's/.*=//p'`
+        case $id in
+	    TEST_MODE)
+		TEST_MODE=`echo $reg_m |sed -n 's/\s.*//p'`
+	    ;;
+	    P_SPEED)
+	        P_SPEED=`echo $reg_m |sed -n 's/\s.*//p'`
+            ;;
+	esac
+    done
+IFS=$old_IFS
+
+
+file="$TMPD/cons"
+while read line
+do
+# display $line or do somthing with $line
+CONS=$line
+done < $file
+# Определяем порт платы коммутации
+COMP=
+for itty in $(ls /dev/ttyUSB*)
+    do
+        udevadm info -a -n $itty |grep -q "ftdi_sio">/dev/null
+        if [[ $? -eq 0 ]]; then COMP=$itty; break; fi
+    done
+if [[ -n $COMP ]]
+    then
+        consoleLog "[$_pr]: Commutation device port is: <$COMP>." $ALOG $CONS_D
+    else
+	exit 1
+fi
+
+pid_c=`cat $PID_C_B`
+consoleLog "[$_pr]: PID драйвера контроллера : <$pid_c>." $ALOG $CONS_D
+#set -x
+
+#touch $WORKP/sync_need												# необходима синхронизация
+sed -i '/A_USB_S_STATE/s/=.*/=not synced/g' $WP/share/status								# Статус синхронизации USB в файл статуса
+#CONS=`cat ./cons` 
+# Если отладочный режим, то устанавливаем значение переменной и 
+# выводим полную информацию из файла конфигурации
+#CONS=/dev/pts/1
+#set +x
+if [ "$DEBUG" = "y" ];
+    then
+	ALOG_D=$ALOG
+	CONS_D=$CONS
+	echo "Debug logging set" 1>>$ALOG_D
+	echo "Debug log: $ALOG_D" 1>>$ALOG
+	echo "Test mode: $TEST_MODE" 1>>$ALOG
+	echo "$CONS" 1>>$ALOG_D
+	echo "Config options is:" 1>>$ALOG_D
+	echo "------------------------------" 1>>$ALOG_D
+	echo "Com port for control USB: $COMP" 1>>$ALOG_D
+	echo "Ignore ACC: $ACC_IGNORE" 1>>$ALOG_D
+	echo "Debugging: $DEBUG" 1>>$ALOG_D
+	echo "Mount point: $MNT_P" 1>>$ALOG_D
+	echo "Patch to syncing store: $S_DIR" 1>>$ALOG_D
+	echo "Label for playing store: $ST_LBL" 1>>$ALOG_D
+	echo "------------------------------" 1>>$ALOG_D
+	echo 1>>$ALOG_D
+    else
+	CONS_D=/dev/null
+	consoleLog "[$_pr]: Short logging set" $ALOG $CONS
+fi
+
+if [[ -e $CHK_PID ]]; then
+    consoleLog "[$_pr]: Wait for complete rsyncing with remote server" $ALOG_D $CONS
+    inotifywait -e delete $CHK_PID											#ждем окончания синхронизации с сервером
+fi
+# Здесь будем проверять статус машины (ACC - +12В зажигание) через Ring Indicator (RI)
+ACC_CAR=$(port__SW RI)
+consoleLog "[$_pr]: Check status ACC_CAR: $ACC_CAR. Ignoring: $ACC_IGNORE" $ALOG_D $CONS
+
+# Если установлен признак игнора зажигания, то работаем дальше, иначе ждем выключения зажигания
+if [ "$ACC_IGNORE" != "y" ];
+    then
+	until [ "$ACC_CAR" == "OFF" ]; do										# Если зажигания включено, то ждем
+		consoleLog "[$_pr]: ACC_CAR: $ACC_CAR ... waiting" $ALOG_D $CONS_D
+		sleep 10
+		ACC_CAR=$(port__SW RI)
+	done
+    else
+	consoleLog "[$_pr]: Ignore ACC status and start local rsync" $ALOG_D $CONS_D
+fi
+consoleLog "[$_pr]: Test connecting status of local USB store <$ST_LBL>" $ALOG_D $CONS_D
+
+# Проверка статуса USB-хранилища для дальнейшей синхронизации
+port__SW ON
+sleep 3
+ls -l /dev/disk/by-label/ |grep $ST_LBL 1>>$ALOG_D								# Подключено?
+CONN=$?														# Сохранили результат
+if [[ "$CONN" -eq "1" ]];											# Если нет то подключаем и проверяем
+    then
+	consoleLog "[$_pr]: Store <$ST_LBL> not connected to <$HOST_N>. Connecting <$ST_LBL> . . ." $ALOG_D $CONS_D
+	port__SW ON												# Подключаем хранилище
+	sleep 5
+	until [ "$CONN" -eq "0" ]; do										
+	    consoleLog "[$_pr]: Waiting to connecting local USB store ..." $CONS
+	    sleep 2
+	    let CNT=CNT+1											# Запустили счетчик цикла ожидания подключения
+	    if [ "$CNT" -eq "6" ];										# Выход по ошибке
+		then
+		    consoleLog "[$_pr]: ### ERROR: Local USB store not connected or not exist." $ALOG $CONS
+		    consoleLog "[$_pr]: ### ERROR: Please check what USB connected to <$HOST_N> and have label <$ST_LBL>." $ALOG $CONS
+		    consoleLog "[$_pr]: ### ERROR: Exit." $ALOG $CONS
+		    port__SW OFF
+		    rm $PIDFILE_S
+		    exit 1
+		else
+		    ls -l /dev/disk/by-label/ |grep $ST_LBL 1>>$ALOG_D										# Подключено устройство?
+		    CONN=$?															# Сохранили результат
+	    fi
+	done
+#	port__SW UON																# Включили индикатор USB
+	consoleLog "[$_pr]: Local USB store <$ST_LBL> connected." $ALOG_D $CONS
+	consoleLog "[$_pr]: Сhecking filesystem and repair  ..." $ALOG_D $CONS
+	PART_VFAT=`ls -l /dev/disk/by-label/ |grep $ST_LBL |sed 's/.*\/sd/\/sd/;s/ .*//'`
+	dosfsck -afVw /dev$PART_VFAT 1>>$ALOG_D
+
+    else
+	consoleLog "[$_pr]: Store is connected to <$HOST_N>" $ALOG_D $CONS									# Уже подключено
+fi
+sed -i '/A_USB_STATE/s/=.*/=to host/g' $WP/share/status													# Статус USB в файл статуса
+
+#проверяем точки монтирования и наличие накопителя для синхронизации и проигрывания
+consoleLog "[$_pr]: Cheking of mount point <$MNT_P> and mounting local USB store" $ALOG_D $CONS
+if ! [ -d "$MNT_P" ]
+    then														# Если нет точки монтирования
+        mkdir $MNT_P													# Создаем
+        mount -L $ST_LBL $MNT_P												# и монтируемся туда по метке
+    else
+        mountpoint -d $MNT_P >/dev/null											# проверяем что туда что-то смонтировано (зачем)
+	mount -L $ST_LBL $MNT_P															#Монтируем хранилище
+fi
+
+mount -l |grep $ST_LBL 1>> $ALOG_D														# проверка монтирования
+if [ "$?" -eq "0" ]; then
+	consoleLog "[$_pr]: Local USB store with label <$ST_LBL> is mounted to <$HOST_N>" $ALOG_D $CONS
+	consoleLog "[$_pr]: Общий/свободный объем раздела <$ST_LBL> для медиа-файлов: `df -h /mnt/audio|awk 'NR==2 {print $2"/"$4}'''`" $CONS
+    else
+	consoleLog "[$_pr]: ### ERROR: Partition <$ST_LBL> not mounted" $ALOG $CONS
+	consoleLog "[$_pr]: ### ERROR: Exit." 1>> $ALOG
+	port__SW OFF																# Отключили хранилище
+	rm $PIDFILE_S																# Удалили PID-файл
+	exit 1																	# Ушли с ошибкой
+fi
+
+# если предыдущие проверки прошли удачно - синхронизируемся
+                consoleLog "[$_pr]: Starting local rsync for synchronizaion USB store <$ST_LBL> on <$HOST_N>" $ALOG $CONS
+
+		port__SW USND															# Индикация обмена
+		echo performance > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+                start=$(date +%s)
+                rsync -rq --size-only --delete $S_DIR/ $MNT_P 1>>$CONS #2>&1 >$CONS #/var/log/rsync.log
+		if [[ $? == 0 ]]; then
+		    rm $WP/share/out_of_sync
+		    echo "sync" > $WP/share/playsync_state
+		fi
+                end=$(date +%s)
+		sync																# Сбрасываем буфера
+		echo powersave > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+		pushd $MNT_P 2>&1 > /dev/null													# Переходим в каталог для составления списка файлов
+		find . -type f | sed -n 's/.*\///p' > $TMPD/fl1
+		LC_ALL=C sort -d $TMPD/fl1 > $WP/share/list_fplay										# Составляем список файлов для контроля
+		popd 2>&1 > /dev/null														# Возвращаемся в рабочий каталог
+		port__SW UON															# Выключили индикацию Tx/Rx USB
+                printf "%s\n" "-----------------------------------------------------------------------" 1>>$ALOG
+                printf "Download time: %.2d:%.2d:%.2d\n" $(( (end -= start) / 3600 )) $(( (end %= 3600) / 60 )) $(( end %= 60 )) 1>>$ALOG
+		consoleLog "[$_pr]: Общий/свободный объем раздела <$ST_LBL> после локальной синхронизации: `df -h /mnt/usb_play|awk 'NR==2 {print $2"/"$4}'''`" $CONS
+#		rm $WORKP/sync_need														# Синхронизация проведена, удаляем маркер синхронизации
+		sed -i '/A_USB_S_STATE/s/=.*/=synced/g' $WP/share/status									# Статус синхронизации USB в файл статуса
+		consoleLog "[$_pr]: Removing sync marker" $ALOG_D
+		consoleLog "[$_pr]: End of synchronization store <$ST_LBL>" $ALOG_D $CONS
+		consoleLog "[$_pr]: ACC signal is: $ACC_CAR" $ALOG_D $CONS_D
+		consoleLog "[$_pr]: Connecting store <$ST_LBL> to car for playing" $ALOG $CONS_D							# Если да то возвращаем в машину
+		umount $MNT_P 1>>$ALOG														# Размонтируем
+		port__SW OFF															# Отключаем хранилище и подключаем к машине
+		sleep 3
+		ls -l /dev/disk/by-label/ |grep $ST_LBL 1>>$ALOG_D
+		CONN=$?
+		if [[ $CONN -eq 0 ]];
+		    then
+			consoleLog "[$_pr]: ### ERROR: Store not connected to car. Please check hardware on host <$HOST_N>" $ALOG $CONS
+			consoleLog "[$_pr]: ### ERROR: Exit." $ALOG $CONS
+			rm $PIDFILE_S
+			exit 1
+		    else
+			consoleLog "[$_pr]: Store <$ST_LBL> connected to car." $ALOG $CONS
+			sed -i '/A_USB_STATE/s/=.*/=to car/g' $WP/share/status										# Статус USB в файл статуса
+		fi
+	rm $PIDFILE_S
+	consoleLog "[$_pr]: Exit from local sync mode sucsessfull." $ALOG $CONS_D
+	exit 0

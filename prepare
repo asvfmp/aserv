@@ -1,0 +1,112 @@
+#!/bin/bash
+YOCTO_W=/home/asv/Carusb/edm-yocto
+W_DIR=Carusb
+
+if ! [[ -d ~/$W_DIR/aserv/tmp ]]; then mkdir ~/$W_DIR/aserv/tmp; fi
+if ! [[ -d ~/$W_DIR/aserv/pkg-edm ]]; then mkdir ~/$W_DIR/aserv/pkg-edm; fi
+if ! [[ -d ~/$W_DIR/aserv/pkg_tst-edm ]]; then mkdir ~/$W_DIR/aserv/pkg_tst-edm; fi
+
+#mkdir ~/Extend/aserv/tmp/aserv
+#cp ./* ~/Extend/aserv/tmp/aserv
+#pushd ~/Extend/aserv/tmp
+arg=("$@")
+of_cpc=
+of_img=
+for (( ia=0; ia<=$#; ia++)) #in {$#}
+    do
+	if [[ ${arg[$ia]} == "-w" ]] || [[ ${arg[$ia]} == "--work" ]]; then echo "Prepare for work CarPc"; of_cpc=work;fi  #$@ |grep 'w\|\|work' #|echo "working CPC"
+	if [[ ${arg[$ia]} == "-t" ]] || [[ ${arg[$ia]} == "--test" ]]; then echo "Prepare for test CarPc"; of_cpc=tst;fi  #$@ |grep 'w\|\|work' #|echo "working CPC"
+	if [[ ${arg[$ia]} == "-u" ]] || [[ ${arg[$ia]} == "--upgrade-image" ]]; then echo "Make image CarPc"; of_img=image;fi  #$@ |grep 'w\|\|work' #|echo "working CPC"#	echo ${arg[$ia]}
+	if [[ ${arg[$ia]} == "-p" ]] || [[ ${arg[$ia]} == "--package" ]]; then echo "Make package for CarPc"; of_img=pkg;fi  #$@ |grep 'w\|\|work' #|echo "working CPC"#	echo ${arg[$ia]}
+done
+task=$of_cpc-$of_img
+echo $task
+#exit
+case $task in
+    "tst-pkg" | "tst-")											# готовим пакет для тестового CarPc
+	echo "Готовим пакет для копирования на тестовый CarPc"
+	mkdir ~/$W_DIR/aserv/tmp/aserv
+	cp -R ./* ~/$W_DIR/aserv/tmp/aserv
+	pushd ~/$W_DIR/aserv/tmp
+	echo -n "Архивируем ..."
+	tar -czvf ~/$W_DIR/aserv/pkg_tst-edm/aserv.tar ./aserv --exclude=*.bak --exclude=prepare
+	rm -rf ~/$W_DIR/aserv/tmp/aserv
+	echo "готово."
+	pushd ~/$W_DIR/aserv/pkg_tst-edm
+	echo -n "Готовим файлы контрольных сумм ..."
+	md5sum aserv.tar >md5
+	sha256sum aserv.tar >sha256
+	echo "готово."
+	popd
+	popd
+    ;;
+    "work-pkg" | "work-")											# готовим пакет для рабочего CarPc
+	echo "Готовим пакет для копирования на рабочий CarPc"
+	mkdir ~/$W_DIR/aserv/tmp/aserv
+	cp -R ./* ~/$W_DIR/aserv/tmp/aserv
+	pushd ~/$W_DIR/aserv/tmp
+	echo -n "Архивируем ..."
+	tar -czvf ~/$W_DIR/aserv/pkg-edm/aserv.tar ./aserv --exclude=*.bak --exclude=prepare
+	rm -rf ~/$W_DIR/aserv/tmp/aserv
+	echo "готово."
+	pushd ~/$W_DIR/aserv/pkg-edm
+	echo -n "Готовим файлы контрольных сумм ..."
+	md5sum aserv.tar >md5
+	sha256sum aserv.tar >sha256
+	echo "готово."
+	popd
+	popd
+    ;;
+    tst-image)											# готовим пакет и образ для тестового CarPc
+	echo "Готовим пакет для формирования образа диска тестового CarPc"
+	mkdir ~/$W_DIR/aserv/tmp/aserv
+	cp -R ./* ~/$W_DIR/aserv/tmp/aserv
+	pushd ~/$W_DIR/aserv/tmp
+	echo -n "Архивируем ..."
+	tar -czvf ~/$W_DIR/aserv/pkg_tst-edm/aserv.tar ./aserv --exclude=*.bak --exclude=prepare
+	rm -rf ~/$W_DIR/aserv/tmp/aserv
+	echo "готово."
+	pushd ~/$W_DIR/aserv/pkg_tst-edm
+	echo -n "Готовим файлы контрольных сумм ..."
+	md5sum aserv.tar  >md5
+	mdsum=`cat md5 |sed -n 's/ .*//p'` 
+	sha256sum aserv.tar >sha256
+	shasum=`cat sha256 |sed -n 's/ .*//p'`
+	echo "готово. sha256sum=$shasum, md5sum=$mdsum"
+	popd
+	pushd $YOCTO_W
+	sed -i '/SRC_URI.md5sum./s/".*"/"'$mdsum'"/g' $YOCTO_W/sources/meta-cpc/recipes-aserv/aserv-dev/aserv-dev.bb
+	sed -i '/SRC_URI.sha256sum./s/".*"/"'$shasum'"/g' $YOCTO_W/sources/meta-cpc/recipes-aserv/aserv-dev/aserv-dev.bb
+	./mkimg upgr-pkg-aserv-dev
+	popd
+	popd
+    ;;
+    work-image)											# готовим пакет и образ для рабочего CarPc
+	echo "Готовим пакет для формирования образа диска рабочего CarPc"
+	mkdir ~/$W_DIR/aserv/tmp/aserv
+	cp -R ./* ~/$W_DIR/aserv/tmp/aserv
+	pushd ~/$W_DIR/aserv/tmp
+	echo -n "Архивируем ..."
+	tar -cvzf ~/$W_DIR/aserv/pkg-edm/aserv.tar ./aserv --exclude=*.bak --exclude=prepare
+	rm -rf ~/$W_DIR/aserv/tmp/aserv
+	echo "готово."
+	pushd ~/$W_DIR/aserv/pkg-edm
+	echo -n "Готовим файлы контрольных сумм ..."
+	md5sum aserv.tar  >md5
+	mdsum=`cat md5 |sed -n 's/ .*//p'` 
+	sha256sum aserv.tar >sha256
+	shasum=`cat sha256 |sed -n 's/ .*//p'`
+	echo "готово. sha256sum=$shasum, md5sum=$mdsum"
+	popd
+	pushd $YOCTO_W
+	sed -i '/SRC_URI.md5sum./s/".*"/"'$mdsum'"/g' $YOCTO_W/sources/meta-cpc/recipes-aserv/aserv/aserv.bb
+	sed -i '/SRC_URI.sha256sum./s/".*"/"'$shasum'"/g' $YOCTO_W/sources/meta-cpc/recipes-aserv/aserv/aserv.bb
+	./mkimg upgr-pkg-aserv
+	popd
+	popd
+    ;;
+    *)
+	echo "Usage -w||--work -t||--test and -u||--upgrade-image "
+    ;; 
+esac
+exit

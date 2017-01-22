@@ -1,0 +1,62 @@
+#!/bin/bash
+
+WP=$(cd `dirname $0` && pwd)
+WORKP=$WP
+
+source $WP/syncaserv.conf
+source $WP/conlog
+source $WP/portsw
+
+PIDFILE_S=/var/run/restart.pid
+CHK_PID=/var/run/rasync.pid
+HOST_N=`uname -n`
+TMPD=/tmp/aserv
+
+
+file="$TMPD/cons"
+while read line
+do
+# display $line or do somthing with $line
+CONS=$line
+done < $file
+
+
+
+#set -x
+_pr1=$0
+_pr=$(basename $_pr1)
+consoleLog "Parameter : $1" $CONS
+if [[ `echo $1|grep -q .conf` -eq "0" ]]
+    then consoleLog "[$_pr]: Configuration file has bin changed. Restart server  <$HOST_N>" $CONS
+    else consoleLog "[$_pr]: Start of update package on <$HOST_N> due to find new version of pakage " $CONS
+fi
+#PID_S_I=`cat /var/run/inotify-watches.pid`
+#consoleLog "[$_pr]: Kill watching process on <$HOST_N> due to find new version of pakage ..." $CONS
+#kill -s INT $PID_S_I
+consoleLog "[$_pr]: Done." $CONS
+# Если отладочный режим, то устанавливаем значение переменной и 
+# выводим полную информацию из файла конфигурации
+#sleep 10
+#set +x
+touch $PID_UPD
+#consoleLog "[$_pr]: Wait for complete rsyncing with remote server" $CONS
+#inotifywait -e delete $CHK_PID											#ждем окончания синхронизации с сервером
+
+                consoleLog "[$_pr]: Starting local rsync for update package on <$HOST_N>" $CONS
+#		/etc/init.d/aserv stop &
+                start=$(date +%s)
+                rm -rf $PKG_S
+		tar -xzvf $PKG_H/aserv.tar -C /opt
+#                rsync -rhtI --delete $PKG_H/ $PKG_S 2>&1 > /var/log/rsync.log
+                end=$(date +%s)
+                printf "%s\n" "-----------------------------------------------------------------------" 1>>$CONS
+                printf "Download time: %.2d:%.2d:%.2d\n" $(( (end -= start) / 3600 )) $(( (end %= 3600) / 60 )) $(( end %= 60 )) 1>>$CONS
+                printf "%s\n" "-----------------------------------------------------------------------" 1>>$CONS
+		gcc --std=gnu99 -o $PKG_S/ioa $PKG_S/ioa.c 1>>$CONS
+		cp $PKG_S/aserv /etc/init.d/aserv								# копируем стартовый скрипт при  загрузке системы
+		consoleLog "[$_pr]: End of update package. Package install to <$PKG_S>. Initialize restart." $CONS
+#shutdown -r now
+	rm -rf $PID_UPD
+	consoleLog "[$_pr]: Exit." $CONS
+/etc/init.d/aserv restart &
+exit

@@ -1,0 +1,10 @@
+#!/bin/bash
+PID_S_I=/var/run/inotify-watches.pid
+touch $PID_S_I
+echo $$ > $PID_S_I
+#trap 'echo "[inotify_w]: Terminate watches by reason: Audio sync server going down by Ctrl-C signal"; exit 1' 2 15
+
+while true
+    do
+	inotifywait -rqq -e create,delete,close_write $1 && /bin/bash /opt/aserv/syncplay
+done

@@ -1,0 +1,440 @@
+#!/bin/bash
+
+WP=$(cd `dirname $0` && pwd)
+WORKP=$WP
+. $WP/portsw
+. $WP/conlog
+. $WP/syncaserv.conf
+. $WP/rasync
+. $WP/net_check
+
+PID_S_F=/var/run/syncaserv.pid		# Пид-файл основного процесса
+PID_S_I=/var/run/inotify-sync.pid	# Пид-файл процесса наблюдения
+PID_S_U=/var/run/inotify-upgrade.pid	# Пид-файл процесса наблюдения
+PID_C_B=/var/run/ioa.pid		# Пид-файл драйвера платы коммутации
+PIDFILE=/var/run/rasync.pid		# Пид-файл процесса удаленной синхронизации
+HOST_SRV=`uname -n`			# Имя хоста
+CONS=/dev/null				# Консоль в трэш
+CONS_D=/dev/null			# Отладочная консоль в трэш
+SLOG_D=/dev/null			# Отладочный журнал
+#PKG_H=/home/syncaserv/pkg		# Путь до хранения текущего дистрибутива для обновления
+TMPD=/tmp/aserv				# Путь до временных файлов
+INCR_T=/var/spool/incron/root		# Таблица Incron
+TETH_M=OFF				# Режим тетеринга
+SIGNL=-USR1
+
+# Функция останова сервера с отключением всех соединений и остановом процессов синхронизации
+
+S_finish ()
+{
+consoleLog "[sync_serv]: Stopping server on <$HOST_SRV>" $CONS $SLOG
+if [ -e $PIDFILE ]; then rm -f $PIDFILE; fi;
+pid_u=`cat $PID_S_U`
+pid_i=`cat $PID_S_I`
+pid_c=`cat $PID_C_B`
+pid_u_c=`ps |grep -v grep |grep "inotifywait.*/home/$USER/pkg"|sed -n 's/ root.*//p'`
+pid_i_c=`ps |grep -v grep |grep 'inotifywait.*/mnt/audio'|sed -n 's/ root.*//p'`
+kill -s KILL $pid_u
+kill -s KILL $pid_i
+for pi in ${pid_i_c}; do kill -s KILL $pi; done
+for pu in ${pid_u_c}; do kill -s KILL $pu; done
+rm $PID_S_I
+rm $PID_S_U
+# Проверяем процесс локальной синхронизации и ждем завершения
+consoleLog "[$FUNCNAME]: Check local sync process ..." $CONS
+if [ -e $PIDFILE_S ]
+    then
+	CNT_W=0
+	printf "\n" 1>>$SLOG_D>>$CONS
+	until [ ! -e $PIDFILE_S ]; do
+        printf "[$(date +'%d-%m-%Y %H:%M:%S')]: [$FUNCNAME]: Wait syncyng local store <$ST_LBL>  $(( TIME_WAIT_RSYNC_STORE*CNT_W )) sec ...\r" 1>>$SLOG_D>>$CONS
+        sleep $TIME_WAIT_RSYNC_STORE
+	let CNT_W+=1
+	done
+	printf "\n" 1>>$SLOG_D>>$CONS
+fi
+consoleLog "[$FUNCNAME]: ... done." $CONS $SLOG
+consoleLog "[$FUNCNAME]: Unload driver for control board ..." $CONS $SLOG
+kill -s TERM $pid_c
+if [ -e $PID_C_B ]
+    then
+	CNT_W=0
+	printf "\n" 1>>$SLOG_D>>$CONS
+	until [ ! -e $PID_C_B ]; do
+        printf "[$(date +'%d-%m-%Y %H:%M:%S')]: [$FUNCNAME]: Wait unloading driver $(( 2*CNT_W )) sec ...\r" 1>>$SLOG_D>>$CONS
+        sleep 2
+	let CNT_W+=1
+	done
+	stty -F $COMP raw speed 9600 -hupcl
+	printf "\n" 1>>$SLOG_D>>$CONS
+fi
+# Далее удаляем все временные файлы
+rm $TMPD/*
+rmdir $TMPD
+# Закрываем сетевые соединения
+#if [[ $TETH_M = "ON" ]]; then network_SET T_OFF; TETH_M=OFF; consoleLog "[$FUNCNAME]: Выключаем тетеринг WiFi" $CONS; fi;
+#if [[ $_type = "3G/4G" ]]; then network_SET $CELL_H OFF; consoleLog "[$FUNCNAME]: Выключаем сотовое соединение на интерфейсе <$A_N_IFACE>" $CONS; fi;
+#port__SW CWOFF
+consoleLog "[$FUNCNAME]: Server on <$HOST_SRV> stopped." $CONS $SLOG
+# Удаляем пид-файл основного процесса
+rm $PID_S_F
+#exit
+}
+
+
+
+#################
+# Main programm #
+#################
+
+# Создаем pid-file 
+touch $PID_S_F
+echo $$>$PID_S_F
+mkdir $TMPD
+
+# Определяем текущую консоль и записываем в файл
+if [ "$L_TTY" == "y" ]; then CONS=`tty`; echo $CONS>$TMPD/cons; fi 
+consoleLog "[sync_serv]: Start synchronization server for audio store <$ST_LBL> on <$HOST_SRV>" $SLOG $CONS
+# Cтавим обработчик останова
+consoleLog "[sync_serv]: Set trap on Ctrl-C signal for synchronization server " $SLOG $CONS
+trap 'consoleLog "[sync_serv]: Audio sync server going down by Ctrl-C signal" $SLOG $CONS; S_finish; exit 1' 2 15
+
+# Определяем порт платы коммутации
+COMP=
+for itty in $(ls /dev/ttyUSB*)
+    do
+#	udevadm info -a -n $itty |grep "CarDuino">/dev/null
+	udevadm info -a -n $itty |grep "ftdi_sio">/dev/null											# Ищем порт платы контроллера
+	if [[ $? == "0" ]]; then COMP=$itty; break; fi
+    done
+
+if [[ -n $COMP ]]; then																# Если нашли то:
+    if [[ "$CPC_DBG" =~ ^[y.*] ]]; then dbg="-d"; else dbg=; fi											# проверяем режим отладки
+    stty -F $COMP raw speed $P_SPEED -hupcl														# устанавливаем аттрибуты порта
+    $WP/ioa $dbg -p $COMP -s $P_SPEED &														# грузим драйвер
+    sleep 1
+    pid_c=`cat $PID_C_B`															# PID драйвера
+    port__SW SON																# Подтверждаем установку связи с хостом
+    sed -i "/C_PORT/s@=.*@=$COMP@g" $WP/share/status												# пишем номер порта в файл статуса
+    sed -i '/C_SPEED/s/=.*/='$P_SPEED'/g' $WP/share/status											# Скорость порта платы коммутации в файл статуса
+else
+	consoleLog "[sync_serv]: Connection module don't connected. Server going down. " $SLOG $CONS
+        sed -i '/C_PORT/s/=.*/=not connected/g' $WP/share/status										# Порт платы коммутации в файл статуса
+        sed -i '/C_SPEED/s/=.*/=0/g' $WP/share/status												# Скорость порта платы коммутации в файл статуса
+	S_finish
+	if [[ "$TEST_MODE" =~ ^[n.*] ]]; then sleep 30; fi											# выключаем хост если не тесовый режим и не нашли плату коммутации
+	exit 1
+fi
+
+ACC=$(port__SW RI)																# Контроль статуса сигнала ACC
+sed -i '/ACC/s/=.*/='$ACC'/g' $WP/share/status													# Cостояние ACC в файл статуса
+
+#echo
+#consoleLog "[$FUNCNAME]: Checking of mount point <$SMNT_P> and partition <$SS_LBL> on <$HOST_SRV> for syncing" $SLOG_D $CONS
+#mount -l |grep $SMNT_P |grep $SS_LBL >/dev/null
+#if ! [ $? -eq 0 ]; then
+#    ls -l /dev/disk/by-label/ |grep $SS_LBL
+#    if ! [ $? -eq 0 ]; then consoleLog "[$FUNCNAME]: ### ERROR ### Device with partition <$SS_LBL> not connected or partition doesn't exist" $CONS $SLOG; return 1; fi;
+     _part=`ls -l /dev/disk/by-label/ |grep $SS_LBL |sed 's/.*\/sd/\/sd/;s/ .*//'`
+#    dosfsck -afVw /dev$_part 1>>$CONS
+#    if ! [ -d "$SMNT_P" ]; then
+#	    mkdir $SMNT_P 1>>$SLOG_D					# Создаем точку монтирования
+#    	    mount -L $SS_LBL $SMNT_P 1>>$SLOG_D				# Монтируем хранилище
+#	else
+#            mount -L $SS_LBL $SMNT_P 1>>$SLOG_D				# Монтируем хранилище
+#    fi
+#    else
+#	consoleLog "[$FUNCNAME]: ... done." $SLOG_D $CONS
+#	consoleLog "[$FUNCNAME]: Общий/свободный объем раздела <$SS_LBL> для удаленной синхронизации: `df -h /mnt/audio|awk 'NR==2 {print $2"/"$4}'''`" $CONS
+#        mount -l |grep $SMNT_P |grep $SS_LBL 1>>$SLOG_D			# Проверяем и пишем в отладку
+#fi
+
+
+
+
+
+#port__SW WON
+
+#WIFI_H=`connmanctl services |grep "$WIFI" |sed -n 's/.* //p'`
+#CELL_H=`connmanctl services |grep "$CELL" |sed -n 's/.* //p'`
+
+
+
+#_NO_ETH=`ip route |grep "default" |sed -n 's/.*dev //p'|sed -n 's/ //p'`
+# Удаляем маршрут по умолчанию если он проводной
+#ip route |grep default |grep -E -q "wlan|wwan"
+
+##if [[ $? = "1" ]]; then consoleLog "[sync_serv]: Удаляем дефолтный маршрут с интерфейса Ethernet" $CONS; sudo ip route del default; fi
+
+###!!!!!!!!!!!!!!!!!!!!!!!!!!! Здесь нужно проверить ACC и выставить tethering если стоит переменная !!!!!!!!!!!!!!!!!!!!
+
+ps |grep NetworkManager.pid  |grep -vsq grep
+if [ $? == 0 ]; then NMAN=NetworkManager; else NMAN=ConnectionManager; fi
+
+#network_SET SERV
+
+#if [[ "$ACC" == "ON" && "$TETH" = "y" ]]; then TETH_M=ON; network_SET T_ON; fi; # Здесь вствить включение тетеринга
+
+
+####################################
+# Тут будем проверять наличие сети #
+####################################
+
+consoleLog "[sync_serv]: Check network connections ..." $CONS $SLOG
+
+A_N_IFACE=""
+N_IFACES=""
+OLD_A_I=eth1
+
+check_NET A_N_IFACE N_IFACES $OLD_A_I
+if [[ $? -eq 1 ]]
+    then
+	port__SW CWOFF
+	consoleLog "[sync_serv]: ###ERROR### : Network isn't reacheable" $CONS $SLOG
+    else
+	OLD_A_I=$A_N_IFACE
+	consoleLog "[sync_serv]: ... done." $CONS $SLOG
+	consoleLog "[sync_serv]: Active network interfaces: <$N_IFACES>" $CONS $SLOG
+	if [[ $A_N_IFACE =~ ^wwan.*$ ]]; then _type=$mdmtech; _conn=CON; elif [[ $A_N_IFACE =~ ^wlan.*$ ]]; then _type=Wi-Fi; _conn=WON; else _type=LAN; _conn=EON;fi;
+#	if ! [[ -z `echo $A_N_IFACE |grep ww` ]]; then _type=3G/4G; port__SW CON; elif ! [[ -z `echo $A_N_IFACE |grep wl` ]]; then _type=Wi-Fi; port__SW WON; else _type=LAN; fi;
+#	if ! [[ -z `echo $A_N_IFACE |grep ww` ]]; then _type=LTE; elif ! [[ -z `echo $A_N_IFACE |grep wl` ]]; then _type=WiFi; else _type=LAN; fi;
+	consoleLog "[sync_serv]: Network is connected on interface <$A_N_IFACE> ($_type)" $CONS $SLOG
+	port__SW $_conn 1
+fi
+
+modem=`mmcli -L | sed -n 's/.*\/Modem\///;s/ \[.*//p'`
+mdmstate=`mmcli -m 0 |grep "  state:"|sed 's/.*|.*  state: \x27//;s/\x27//'`
+mdmtech=`mmcli -m 0 |grep "access tech:"|sed 's/.*access tech: \x27//;s/\x27//'`
+mdm_sig=`mmcli -m 0 |sed -n 's/.*signal quality: \x27//;s/\x27 .*//p'`
+
+# Выводим переменные из конфига
+if [ "$SRV_DBG" == "y" ];
+    then
+        SLOG_D=$SLOG
+        CONS_D=$CONS
+        consoleLog "[sync_serv]: Debug logging mode set: $SRV_DBG" $SLOG_D $CONS
+        consoleLog "[sync_serv]: Log file is: $SLOG_D" $SLOG $CONS
+#       consoleLog  $SLOG_D $CONS
+        consoleLog "[sync_serv]: Current config options is:" $SLOG_D $CONS
+        consoleLog "             ----------------------------------------------" $SLOG_D $CONS
+        consoleLog "[sync_serv]: Remote host IP: $R_SERV" $SLOG_D $CONS
+        consoleLog "[sync_serv]: Remote dir: $R_DIR" $SLOG_D $CONS
+        consoleLog "[sync_serv]: Remote user: $R_USER" $SLOG_D $CONS
+	consoleLog "[sync_serv]: Tethering enable : $TETH_M" 1>>$SLOG_D $CONS
+	consoleLog "[sync_serv]: Tethering mode : $TETH_M" 1>>$SLOG_D $CONS
+        consoleLog "[sync_serv]: Local mount point: $SMNT_P" $SLOG_D $CONS
+        consoleLog "[sync_serv]: Label for syncing store: $SS_LBL" $SLOG_D $CONS
+        consoleLog "[sync_serv]: Network interfaces on $HOST managed by $NMAN" $SLOG_D $CONS
+        consoleLog "             ----------------------------------------------" $SLOG_D $CONS
+        consoleLog "[sync_serv]: Modem number:				$modem" $SLOG_D $CONS
+        consoleLog "[sync_serv]: Modem state:				$mdmstate" $SLOG_D $CONS
+        consoleLog "[sync_serv]: Current modem technology connection:	$mdmtech" $SLOG_D $CONS
+        consoleLog "[sync_serv]: Modem signal quality:			$mdm_sig" $SLOG_D $CONS
+        consoleLog "             ----------------------------------------------" $SLOG_D $CONS
+
+
+
+#        consoleLog $SLOG_D
+#	sleep 3
+    else
+	consoleLog "[sync_serv]: Set is short logging mode. See $SLOG" $SLOG $CONS
+fi
+
+
+e2fsck -p /dev$_part 1>>$CONS 
+# Устанавливаем наблюдение за каталогами синхронизации медиа и кода программы
+consoleLog "[sync_serv]: Load inotify system table for syncing store (watch catalog: $SMNT_P)" $SLOG $CONS
+if ! [[ -d $SMNT_P ]]; then mkdir $SMNT_P; mount -L $SS_LBL $SMNT_P 1>>$SLOG_D; else mount -L $SS_LBL $SMNT_P 1>>$SLOG_D; fi	# Проверка на существование каталога наблюдения и создание его при отсутствии
+$WP/inotify-sync $WP/share/playsync_state &
+#$WP/inotify-sync $SMNT_P &
+sleep 1
+consoleLog "[sync_serv]: Load inotify system table for update package ( watch catalog: $PKG_H )" $SLOG $CONS
+if ! [[ -d $PKG_H ]]; then mkdir $PKG_H; fi																	# Проверка на существование каталога наблюдения и создание его при отсутствии
+$WP/inotify-upgrade $PKG_H &
+consoleLog "[sync_serv]: ... done." $CONS
+# Тут надо бы проверить результат загрузки Incron
+
+sed -i '/SHOST/s/=.*/='$HOST_SRV'/g' $WP/share/status																# Имя хоста в файл статуса
+#sed -i "/C_PORT/s@=.*@=$COMP@g" $WP/share/status																# Порт контроллера в файл статуса
+
+
+# Проверяем статус предыдущего сеанса локальной синхронизации 
+sync_need=`cat $WP/share/playsync_state`
+if [[ "$sync_need" == "out_of_sync" ]]; then
+	consoleLog "[sync_serv]: SYNC flag is set. Start local sync store <$SS_LBL> with audio store <$ST_LBL> on <$HOST_SRV>" $SLOG $CONS
+        sed -i '/A_USB_S_STATE/s/=.*/=not synced/g' $WP/share/status										# Состояние локальной синхронизации в файл статуса
+#	./syncplay																# Проводим первичную синхронизацию локального хранилища
+	consoleLog "[sync_serv]: ... done." $CONS
+    else
+	consoleLog "[sync_serv]: SYNC flag isn't set. Local sync don't need." $CONS
+        sed -i '/A_USB_S_STATE/s/=.*/=synced/g' $WP/share/status										# Состояние локальной синхронизации в файл статуса
+fi
+echo
+
+# Закончили инициализацию и переходим в основной цикл работы
+port__SW INIT
+port__SW $_conn 1
+
+consoleLog "[sync_serv]: Инициализация сервера закончена. Переходим к основному циклу." $CONS $SLOG
+echo
+echo
+
+# Основной цикл работы
+while :
+    do
+	ACC=$(port__SW RI)
+	sed -i '/ACC/s/=.*/='$ACC'/g' $WP/share/status																# Cостояние ACC в файл статуса
+
+
+# В зависимости от статуса ACC запускаем тот или иной режим синхронизации
+
+	if [ "$ACC" == "ON" ]; then consoleLog "[sync_serv]: Audio syncserver running in background mode (once in $TIME_RSYNC sec) on $HOST_SRV because ACC is $ACC " $SLOG $CONS; fi
+
+# Пока включено зажигание крутимся здесь
+
+	    until [ "$ACC" == "OFF" ]; do
+		consoleLog "[sync_serv]: Check network connections ..." $CONS
+		A_N_IFACE=""
+		N_IFACES=""
+
+		until [ -n "$A_N_IFACE" ]
+		    do
+			check_NET A_N_IFACE N_IFACES $OLD_A_I
+			if [[ $? -ne "0" ]]
+		    	    then
+				echo "[sync_serv]: ### ERROR: Network isn't reacheable"
+			    else
+				consoleLog "[sync_serv]: ... done." $CONS
+				consoleLog "[sync_serv]: Active network interfaces: <$N_IFACES>" $CONS
+				if [[ $A_N_IFACE =~ ^wwan.*$ ]]; then _type=$mdmtech; _conn=CON; elif [[ $A_N_IFACE =~ ^wlan.*$ ]]; then _type=Wi-Fi; _conn=WON; else _type=LAN; _conn=EON; fi;
+				port__SW $_conn 1
+				consoleLog "[sync_serv]: Network is connected on interface <$A_N_IFACE> ($_type)" $CONS $SLOG_D
+				OLD_A_I=$A_N_IFACE
+			fi
+			ACC=$(port__SW RI)																		# Проверяем статус ACC
+			if [[ "$ACC" == "OFF" ]]
+			    then																			# Пропало ACC
+				consoleLog  "[sync_serv]: ACC is: $ACC. Break waiting network connection" $CONS
+				port__SW SOFF $TIME_RSYNC_BATT																# Программируем время включения
+				poweroff																		# идем спать
+			fi
+		done
+
+		remote_SYNC																				# Синхронизируемся с удаленным сервером
+
+		if ! [[  $? -eq 0 ]]; then consoleLog "[sync_serv]: Remote sync not completed. See log" $CONS $SLOG; fi
+
+		VBATT=$(cat /tmp/cpc-cb/vb)																		# Проверяем напряжение батареи
+#		VBATT=$((VBATT*BATT_mul))
+		sed -i '/B_LEVEL/s/=.*/='$VBATT'/g' $WP/share/status															# Напряжение батареи в файл статуса
+		VBATf=$(awk -v x1=$VBATT -v x2=$BATT_div 'BEGIN {printf "%.2f",x1/x2}')
+		consoleLog "[sync_serv]: Battery voltage is: $VBATf" $SLOG_D $CONS
+
+		consoleLog "[sync_serv]: Wait next sync cycle after $TIME_RSYNC sec" $SLOG_D $CONS
+		time_r=$((TIME_RSYNC/5))
+		for ((a=1; a <= time_r ; a++))																		# Двойные круглые скобки и "LIMIT" без "$".
+		    do
+			ACC=$(port__SW RI)																		# Проверяем статус ACC
+			if [[ "$ACC" == "OFF" ]]; then consoleLog  "[sync_serv]: ACC is: $ACC " $CONS; break; fi;									# Пропало ACC
+			sleep 5																				# Ждем
+		done																					# Конструкция заимствована из 'ksh93'.
+
+	    done
+
+# Проверяем все ли процессы синхронизации завершены
+    consoleLog "[sync_serv]: Audio sync server running in periodically mode (suspend to $S_MODE once in $TIME_RSYNC_BATT sec) because ACC is $ACC " $SLOG $CONS				# Переход на ветку с экономией энергии при работе от батарей
+	until [ "$ACC" == "ON" ]; do																			# Пока выключено зажигание - крутимся здесь
+	    sed -i '/ACC/s/=.*/='$ACC'/g' $WP/share/status																# Cостояние ACC в файл статуса
+
+	    consoleLog "[sync_serv]: Check network connections ..." $CONS
+	    A_N_IFACE=""
+	    N_IFACES=""
+
+	    CONN_STATE=disconnected
+	    for (( i=0; i<10; i++ ))
+		do
+		    check_NET A_N_IFACE N_IFACES $OLD_A_I
+		    if [[ $? -eq "0" ]]; then CONN_STATE=connected; break; fi
+		    sleep 2
+		done
+	    consoleLog "[sync_serv]: Статус сетевого соединения: $CONN_STATE" $SLOG $CONS
+	    if ! [[ $CONN_STATE == "connected" ]]
+		then
+		    ACC=$(port__SW RI)																			# Проверяем статус ACC перед засыпанием
+		    if [[ "$ACC" == "ON" ]]; then break; fi																# Выходим из цикла по причине появления зажигания
+		    consoleLog "[sync_serv]: ...WARNING... Network not reacheable. sleeping" $SLOG $CONS
+		    port__SW SOFF $TIME_RSYNC_BATT
+		    poweroff
+	    fi
+	    remote_SYNC 																				# Удаленная синхронизация
+	    if ! [[  $? -eq 0 ]]																			# Проверка кода возврата
+		then 
+		    consoleLog "[sync_serv]: ### ERROR ### Remote sync not completed or not started. See log" $CONS $SLOG
+		else
+		    consoleLog "[sync_serv]: Remote_SYNC completed. Синхронизировались перед засыпанием" $CONS $SLOG_D
+	    fi
+
+# Перед переходом в standby проверяем окончание локальной синхронизации
+	    consoleLog "[sync_serv]: Пид-файл: $PIDFILE_S" $CONS
+	    CNT_W=0
+	    printf "\n" 1>>$SLOG_D>>$CONS
+	    sleep 3
+		until [ ! -e $PIDFILE_S ]; do
+		    printf "[sync_serv]:           Wait syncyng local store <$ST_LBL>  $(( TIME_WAIT_RSYNC_STORE*CNT_W )) sec ...\r" 1>>$SLOG_D>>$CONS
+		    sleep $TIME_WAIT_RSYNC_STORE																	# Ждем окончания синхронизации с локальным хранилищем
+		    let CNT_W+=1
+		done
+
+	    ACC=$(port__SW RI)																				# Проверяем статус ACC перед засыпанием
+	    if [[ "$ACC" == "OFF" ]]
+		then
+		    port__SW SOFF $TIME_RSYNC_BATT																	# Время сна отдали в контроллер платы коммутации
+		    printf "\n\n" 1>>$SLOG_D>>$CONS
+		    consoleLog "[sync_serv]: Все процессы синхронизации закончены. Засыпаем на время $TIME_RSYNC_BATT сек" $SLOG $CONS
+#		    if [[ "$TETH_M" = "ON" ]]; then network_SET T_OFF; fi;														# Выключаем тетеринг
+		    if [[ "$TEST_MODE" =~ ^[n.*] ]]; then sudo poweroff; fi														# Отключаем хост
+		else
+		    printf "\n\n" 1>>$CONS
+		    consoleLog "[sync_serv]: Появилось зажигание (ACC). Проверяем режим дальнейшей работы" $CONS
+		    break																				#############  Выходим из цикла по причине ACC
+	    fi
+#######################################################################################################################################################################################
+#set -x
+#	    sudo rtcwake -u -s $TIME_RSYNC_BATT -m $S_MODE 1>>$SLOG_D
+#		    sleep 20 #$TIME_RSYNC																		# Это костыль
+	    printf "\n\n" 1>>$CONS
+	    consoleLog "[sync_serv]: Появилось зажигание (ACC). Проверяем режим дальнейшей работы" $CONS
+
+#	    consoleLog "[sync_serv]: Restart service Ofono ..." $CONS
+#	    sudo service ofono restart 1>/dev/null							# Костыль. Ofono не перезапускается после suspend
+#	    sleep 20
+#	    sudo service connman restart
+#	    sleep 5
+#	    consoleLog "[sync_serv]: ... done." $CONS
+
+	    consoleLog "[sync_serv]: Check network connections ..." $CONS
+	    A_N_IFACE=""
+	    N_IFACES=""
+# Здесь переписать по поводу старого интерфейса. Переписать как инициализацию.
+	    check_NET A_N_IFACE N_IFACES $OLD_A_I
+	    OLD_A_I=$A_N_IFACE
+
+	    if [[ $? -eq 1 ]];
+	        then
+		    port__SW CWOFF
+		    consoleLog "[sync_serv]: ### ERROR ### Network isn't reacheable" $CONS $SLOG
+	        else
+		    consoleLog "[sync_serv]: ... done." $CONS
+		    consoleLog "[sync_serv]: Active network interfaces: <$N_IFACES>" $CONS
+		    if ! [[ -z `echo $A_N_IFACE |grep ww` ]]; then _type=$mdmtech; port__SW CON; elif ! [[ -z `echo $A_N_IFACE |grep wl` ]]; then _type=Wi-Fi; port__SW WON; else _type=LAN; fi;
+		    consoleLog "[sync_serv]: Network is connected on interface <$A_N_IFACE> ($_type)" $CONS $SLOG_D
+	    fi
+
+#	    ACC=$(port__SW RI)
+#	    if [ $ACC = "OFF" ]; then consoleLog "Working on battery. ACC is $ACC" $CONS; fi
+
+	done
+	consoleLog "[sync_serv]: Return to active working mode. ACC is $ACC" $SLOG $CONS
+	if [[ "$TETH_M" = "ON" ]]; then network_SET T_ON; consoleLog "[sync_serv]: Включаем тетеринг WiFi" $CONS; fi;									# Включаем тетеринг
+#set +x
+done

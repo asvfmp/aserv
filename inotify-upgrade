@@ -1,0 +1,10 @@
+#!/bin/bash
+PID_S_U=/var/run/inotify-upgrade.pid
+touch $PID_S_U
+echo $$ > $PID_S_U
+trap 'echo "[inotify_u]: Terminate upgrade watches by reason: -Audio sync server going down by Ctrl-C signal"; exit 1' 2 15
+
+while true
+    do
+	inotifywait -rqq -e close_write $1 && /bin/bash /opt/aserv/restart
+done

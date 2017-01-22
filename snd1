@@ -1,0 +1,53 @@
+#!/bin/bash
+pid=`ps |grep -v grep|grep iot| sed -n 's/ root.*//p'`
+
+while :
+do
+echo -n ON>/tmp/cpc-cb/messages
+kill -10  $pid
+sleep 5
+echo -n OFF>/tmp/cpc-cb/messages-play
+kill -12 $pid
+sleep 3
+echo -n "WIFI 1">/tmp/cpc-cb/messages
+kill -10 $pid
+sleep 3
+echo -n "WIFI 2">/tmp/cpc-cb/messages-play
+kill -12 $pid
+sleep 3
+echo -n "CELL 1">/tmp/cpc-cb/messages
+kill -10 $pid
+sleep 3
+echo -n "CELL 2">/tmp/cpc-cb/messages-play
+kill -12 $pid
+sleep 3
+echo -n "USB 1">/tmp/cpc-cb/messages
+kill -10 $pid
+sleep 3
+echo -n "USB 2">/tmp/cpc-cb/messages-play
+kill -12 $pid
+sleep 3
+echo -n "WIFI 1">/tmp/cpc-cb/messages
+kill -10 $pid
+sleep 3
+echo -n "CELL 1">/tmp/cpc-cb/messages-play
+kill -12 $pid
+sleep 3
+echo -n "USB 1">/tmp/cpc-cb/messages
+kill -10 $pid
+sleep 3
+echo -n "WIFI 0">/tmp/cpc-cb/messages-play
+kill -12 $pid
+sleep 3
+echo -n "CELL 0">/tmp/cpc-cb/messages
+kill -10 $pid
+sleep 3
+echo -n "USB 0">/tmp/cpc-cb/messages-play
+kill -12 $pid
+sleep 3
+done
+
+
+
+
+

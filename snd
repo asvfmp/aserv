@@ -1,0 +1,4 @@
+#!/bin/bash
+pid=`ps |grep -v grep|grep iot| sed -n 's/ root.*//p'`
+echo -n "USB 0">/tmp/cpc-cb/messages
+kill -10  $pid

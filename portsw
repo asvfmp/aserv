@@ -1,0 +1,178 @@
+#!/bin/bash
+port__SW ()
+{
+#	consoleLog "[$FUNCNAME]: ВЫЗВАЛИ!!!!!!!!!!!!!!!!!! $1" $CONS
+
+	    while [ -s $CMD_FILE ]
+	    do
+		sleep 0.5
+	    done
+	    case $1 in
+		'SON')
+		    echo -n "UP">$CMD_FILE 
+		    kill $SIGNL $pid_c
+		;;
+		'SOFF')
+		    consoleLog "[$FUNCNAME]: Send to controller q-ty of second to sleep" $CONS_D
+		    (( TB=$TIME_RSYNC_BATT / 60 ))
+		    echo -n "DWN $TIME_RSYNC_BATT">$CMD_FILE 
+		    kill $SIGNL $pid_c
+		;;
+		'RI')
+		    if [[ -e /tmp/cpc-cb/acc ]]; then echo -n "ON"; else echo -n "OFF";fi
+		;;
+		'CON')
+		    consoleLog "[$FUNCNAME]: Indication LED: <$1>, status <$2>" $CONS_D
+		    echo -n "CELL $2">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+		'COFF')
+		    consoleLog "[$FUNCNAME]: LED status: cellular OFF" $CONS_D
+		    echo -n "CELL 0">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+	        'WON')
+		    consoleLog "[$FUNCNAME]: Indication LED: <$1>, status <$2>" $CONS_D
+		    echo -n "WIFI $2">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+	        'WOFF')
+		    consoleLog "[$FUNCNAME]: LED status: WiFi OFF" $CONS_D
+		    echo -n "WIFI 0">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+	        'CWON')
+		    consoleLog "[$FUNCNAME]: LED status: GSM and WiFi ON" $CONS_D
+		    echo -n "CELL 1">$CMD_FILE
+		    kill $SIGNL $pid_c
+		    sleep 0.1
+		    while [ -s $CMD_FILE ]; do sleep 0.5; done
+		    echo -n "WIFI 1">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+		'CWOFF')
+		    consoleLog "[$FUNCNAME]: LED status: GSM and WiFi OFF" $CONS_D
+		    echo -n "CELL 0">$CMD_FILE
+		    kill $SIGNL $pid_c
+		    sleep 0.1
+		    while [ -s $CMD_FILE ]; do sleep 0.5; done
+		    echo -n "WIFI 0">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+	        'EON')
+		    consoleLog "[$FUNCNAME]: Indication LED: <$1>, status <$2>" $CONS_D
+		    echo -n "CELL $2">$CMD_FILE
+		    kill $SIGNL $pid_c
+		    sleep 0.1
+		    while [ -s $CMD_FILE ]; do sleep 0.5; done
+		    echo -n "WIFI $2">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+		'EOFF')
+		    consoleLog "[$FUNCNAME]: LED status: Ethernet OFF" $CONS_D
+		    echo -n "CELL 0">$CMD_FILE
+		    kill $SIGNL $pid_c
+		    sleep 0.1
+		    while [ -s $CMD_FILE ]; do sleep 0.5; done
+		    echo -n "WIFI 0">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+		'CSND')
+		    consoleLog "[$FUNCNAME]: LED status: cellular Tx/Rx progress" $CONS_D
+		    echo -n "CELL 2">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+		'WSND')
+		    consoleLog "[$FUNCNAME]: LED status: WiFi Tx/Rx progress" $CONS_D
+		    echo -n "WIFI 2">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+		'ESND')
+		    consoleLog "[$FUNCNAME]: LED status: Ethernet Tx/Rx progress" $CONS_D
+		    echo -n "WIFI 2">$CMD_FILE
+		    kill $SIGNL $pid_c
+		    sleep 0.1
+		    while [ -s $CMD_FILE ]; do sleep 0.5; done
+		    echo -n "CELL 2">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+		'ON')
+		    consoleLog "[$FUNCNAME]: USB connected to host" $CONS_D
+		    echo -n "ON">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+		'OFF')
+		    consoleLog "[$FUNCNAME]: USB disconnected from host" $CONS_D
+		    echo -n "OFF">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+		'UON')
+		    consoleLog "[$FUNCNAME]: LED status: USB connected to host" $CONS_D
+		    echo -n "USB 1">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+		'UOFF')
+		    consoleLog "[$FUNCNAME]: LED status: USB disconnected from host" $CONS_D
+		    echo -n "USB 0">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+		'USND')
+		    consoleLog "[$FUNCNAME]: LED status: USB Rd/Wr operation" $CONS_D
+		    echo -n "USB 2">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+		'SET')
+		    consoleLog "[$FUNCNAME]: Go to SET" $CONS_D
+		    echo -n "SET">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+		'DBGON')
+		    consoleLog "[$FUNCNAME]: Режим отладки контроллера включен" $CONS_D
+		    echo -n "DBG 1">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+		'DBGOFF')
+		    consoleLog "[$FUNCNAME]: Режим отладки контроллера выключен" $CONS_D
+		    echo -n "DBG 0">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+		'INIT')
+		    consoleLog "[$FUNCNAME]: Индикация инициализации контроллера и сервера" $CONS_D
+		    echo -n "CELL 1">$CMD_FILE
+		    kill $SIGNL $pid_c
+		    sleep 0.1
+		    while [ -s $CMD_FILE ]; do sleep 0.1; done
+		    echo -n "WIFI 1">$CMD_FILE
+		    kill $SIGNL $pid_c
+		    sleep 0.1
+		    while [ -s $CMD_FILE ]; do sleep 0.1; done
+		    echo -n "USB 1">$CMD_FILE
+		    kill $SIGNL $pid_c
+		    sleep 0.1
+		    while [ -s $CMD_FILE ]; do sleep 0.1; done
+		    echo -n "CELL 0">$CMD_FILE
+		    kill $SIGNL $pid_c
+		    sleep 0.1
+		    while [ -s $CMD_FILE ]; do sleep 0.1; done
+		    echo -n "WIFI 0">$CMD_FILE
+		    kill $SIGNL $pid_c
+		    sleep 0.1
+		    while [ -s $CMD_FILE ]; do sleep 0.1; done
+		    echo -n "USB 0">$CMD_FILE
+		    kill $SIGNL $pid_c
+		;;
+		*)
+		    consoleLog "[$FUNCNAME]: НЕПОНЯТНАЯ КОМАНДА $1 !!!!!!!!!!!!!!!" $CONS
+		    #echo -n $1>$CMD_FILE
+		    #kill $SIGNL $pid_c
+		    consoleLog "Write MESSAGE" $CONS_D
+		    #trap 'return' USR1
+		    #wait
+		;;
+	    esac
+	    while [ -s $CMD_FILE ]
+	    do
+		sleep 0.1
+	    done
+#	    return
+}

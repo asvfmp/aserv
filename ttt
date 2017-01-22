@@ -1,0 +1,7 @@
+#!/bin/bash
+it=10
+for (( i=0; i<$it; i++))  # while :
+do
+echo $i #./ioa /dev/ttyUSB0 9600 ACC
+#sleep 5
+done

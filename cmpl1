@@ -1,0 +1,19 @@
+#!/bin/bash
+g++ iot.c -o iot
+P_SPEED=115200
+COMP=
+for itty in $(ls /dev/ttyUSB*)
+    do
+	udevadm info -a -n $itty |grep "CarDuino">/dev/null
+	if [[ $? == "0" ]]; then COMP=$itty; break; fi
+    done
+
+if [[ -n $COMP ]]; then
+	./iot -p $COMP -s $P_SPEED
+    else echo "Нет устройства"
+fi
+
+
+
+
+
