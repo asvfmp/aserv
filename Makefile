@@ -16,6 +16,7 @@ EXECUTABLE=ioa
 #    $(CC) $(CFLAGS) $< -o $@      
 
 ioa:
+	$(CC) --std=gnu99 -c $(SOURCES)
 	$(CC) $(SOURCES) -o $(EXECUTABLE)
 clean:
 	rm -rf *.o $(EXECUTABLE)
