@@ -1,7 +1,7 @@
 #CC=gcc
 #CC=arm-poky-linux-gnueabi-gcc
 #LD=arm-poky-linux-gnueabi-ld
-#CFLAGS=”${CFLAGS} --sysroot=<sysroot-dir>”
+CFLAGS=”${CFLAGS} --std=gnu99”
 #CXXFLAGS=”${CXXFLAGS} --sysroot=<sysroot-dir>”
 SOURCES=ioa.c
 OBJECTS=$(SOURCES:.c=.o)
