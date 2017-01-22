@@ -17,3 +17,5 @@ EXECUTABLE=ioa
 
 ioa:
 	$(CC) $(SOURCES) -o $(EXECUTABLE)
+clean:
+	rm -rf *.o $(EXECUTABLE)
