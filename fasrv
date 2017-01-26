@@ -279,14 +279,14 @@ islen=${#B_LEVEL}
 #let islen=islen+1
 ic=$(($HBC+$HBLEN-$islen))
 mvaddch $HBL $ic "["
-attrset "setaf 2"								#Нормальное напряжение батареи
+attrset "setaf 2"								# Нормальное напряжение батареи
 #echo "$B_LEVEL_raw $BLn $BLh $BLl"
 #sleep 1
 
-if [[ $B_LEVEL_raw -le $BLl ]] || [[ $B_LEVEL_raw -gt $BLh ]];
+if [[ $B_LEVEL_raw -le $BLl ]] || [[ $B_LEVEL_raw -gt $BLh ]]			# Критическое состояние батареи
     then
 	attrset "setaf 1"
-elif [[ $B_LEVEL_raw -gt $BLl ]] && [[ $B_LEVEL_raw -lt $BLn ]]
+elif [[ $B_LEVEL_raw -gt $BLl ]] && [[ $B_LEVEL_raw -lt $BLn ]]			# Батарея в процессе заряда/разряда
     then
 	attrset "setaf 3"
 fi
