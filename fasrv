@@ -1,4 +1,5 @@
 #!/bin/bash
+
 WP=$(cd `dirname $0` && pwd)
 
 
@@ -14,16 +15,19 @@ for line in $(cat $WP/syncaserv.conf)
 	id=`echo $line |sed -n 's/=.*//p'`
 	case $id in
 	    BATT_Vn)
-		BL=`echo $line |sed -n 's/.*=//;s/ .*$//p'`
+		BL=`echo $line |sed -n 's/.*=//;s/... .*$//p'`
+		echo $BL
 	    ;;
 	    BATT_Vh)
-		BLh=`echo $line |sed -n 's/.*=//;s/ .*$//p'`
+		BLh=`echo $line |sed -n 's/.*=//;s/.... .*$//p'`
 	    ;;
 	    BATT_Vl)
-		BLl=`echo $line |sed -n 's/.*=//;s/ .*$//p'`
+		BLl=`echo $line |sed -n 's/.*=//;s/... .*$//p'`
+		echo $BLl
 	    ;;
 	    BATT_div)
-		BATT_div=`echo $line |sed -n 's/.*=//;s/ .*$//p'`
+		BATT_div=`echo $line |sed -n 's/.*=//;s/... .*$//p'`
+		echo $BATT_div
 	    ;;
 	    BATT_type)
 		BATT_type=`echo $line |sed -n 's/.*=//;s/ .*$//p'`
@@ -97,7 +101,8 @@ Vd=`echo $BL| sed -n 's/.*\.//;s/ .*$//p'`
 BLn=`awk 'BEGIN {printf("%d\n","'"$BL"'"*"'"$BATT_div"'")}'` 					# Нормальное напряжение
 BLh=`awk 'BEGIN {printf("%d\n","'"$BLh"'"*"'"$BATT_div"'")}'` 					# Верхняя граница
 BLl=`awk 'BEGIN {printf("%d\n","'"$BLl"'"*"'"$BATT_div"'")}'` 					# Нижняя граница
-
+#echo "$BL $BLn $BLh $BLl"
+#sleep 5
 H_ACC="Ignition status: "
 IGL=6
 IGC=37
@@ -165,10 +170,13 @@ for line in $(cat $WP/share/status)
 		S_LEVEL=`echo $line |sed -n 's/.*=//p'`
 	    ;;
 	    B_LEVEL)
-		B_LEVEL_raw=`echo $line |sed -n 's/.*=//p'`					# Читаем напряжение батареи ( умноженное на 100)
+#		B_LEVEL_raw=`echo $line |sed -n 's/.*=//;s/.*$//p'`					# Читаем напряжение батареи ( умноженное на 100)
+		B_LEVEL_raw=`echo $line |sed -n 's/.*=//;s/.$//p'`					# Читаем напряжение батареи ( умноженное на 100)
 		B_LEVEL=`awk 'BEGIN {printf("%.2f\n","'"$B_LEVEL_raw"'"/"'"$BATT_div"'")}'`	# делим на 100
+#		echo $B_LEVEL_raw
 		B_f=`echo $B_LEVEL |sed -n 's/\..*$//p'`					# Получаем целую часть
 		B_d=`echo $B_LEVEL |sed -n 's/^.*\.//p'`					# Получаем дробную часть
+#		echo "$B_f $B_d"
 	    ;;
 	    ACC)
 		ACC=`echo $line |sed -n 's/.*=//p'`
@@ -272,7 +280,10 @@ islen=${#B_LEVEL}
 ic=$(($HBC+$HBLEN-$islen))
 mvaddch $HBL $ic "["
 attrset "setaf 2"								#Нормальное напряжение батареи
-if [[ "$B_LEVEL_raw" -le "$BLl" ]] || [[ "$B_LEVEL_raw" -gt "$BLh" ]]
+#echo "$B_LEVEL_raw $BLn $BLh $BLl"
+#sleep 1
+
+if [[ $B_LEVEL_raw -le $BLl ]] || [[ $B_LEVEL_raw -gt $BLh ]];
     then
 	attrset "setaf 1"
 elif [[ $B_LEVEL_raw -gt $BLl ]] && [[ $B_LEVEL_raw -lt $BLn ]]

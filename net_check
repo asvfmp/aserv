@@ -12,7 +12,7 @@ consoleLog "[$FUNCNAME]: Modem state:...........................$mdmstate" $SLOG
 consoleLog "[$FUNCNAME]: Current modem technology connection:...$mdmtech" $SLOG_D $CONS
 consoleLog "[$FUNCNAME]: Modem signal quality:..................$mdm_sig" $SLOG_D $CONS
 consoleLog "[$FUNCNAME]: --------------------------------------------" $SLOG_D $CONS
-sed -i '/S_LEVEL/s/=.*/='$mdm_sig'/g' $WP/share/status											# Уровень сигнала в файл статуса
+sed -i "/S_LEVEL/s@=.*@=$mdm_sig@g" $WP/share/status											# Уровень сигнала в файл статуса
 }
 
 
@@ -28,7 +28,7 @@ consoleLog "[$FUNCNAME]: Signal strenght:................$wlan_sig" $SLOG_D $CON
 consoleLog "[$FUNCNAME]: Frequency band:.................$wlan_frq" $SLOG_D $CONS
 consoleLog "[$FUNCNAME]: Transmission bitrate:...........$wlan_txrate" $SLOG_D $CONS
 consoleLog "[$FUNCNAME]: --------------------------------------------" $SLOG_D $CONS
-sed -i '/S_LEVEL/s/=.*/='$wlan_sig'/g' $WP/share/status											# Уровень сигнала в файл статуса
+sed -i "/S_LEVEL/s@=.*@=$wlan_sig@g" $WP/share/status											# Уровень сигнала в файл статуса
 }
 
 
