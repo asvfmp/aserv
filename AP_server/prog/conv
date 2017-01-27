@@ -1,0 +1,257 @@
+#!/bin/bash
+work_dir=$(pwd)
+source /home/asv/AP_server/cuesplit
+    
+ 
+chkdec() {
+    test $(which "${1}") || {
+	echo -e "[\e[5;31mW\e[0;0m] Decoder $1 not found, skipping $3"
+	continue
+	}
+    test $(which "${2}") || {
+	echo -e "[\e[5;31mW\e[0;0m] Tag tool $2 not found, skipping $3"
+	continue
+	}
+}
+ 
+say_work() {
+	echo -ne "[\e[5;36mW\e[0;0m] Processing: $file"
+}
+						  
+say_complete() {
+	echo -e "\r[\e[0;32mV\e[0;0m] Decoding complete: $file"
+}
+						   
+say_failed() {
+	echo -e "\r[\e[5;31mF\e[0;0m] Decoding FAILED: $file"
+}
+						    
+say_exist() {
+	echo -e "[\e[0;33mE\e[0;0m] Already done: $file"
+}
+						     
+m4atags_convert() {
+    mp4info "${1}" | awk '
+	/^ Name:/{
+		gsub(/^ Name: /, "TITLE=", $0)
+		print
+	}
+						    			 
+	/^ Artist:/{
+		gsub(/^ Artist: /, "ARTIST=", $0)
+		print
+	}
+						    						 
+	/^ Year:/{
+		gsub(/^ Year: /, "DATE=", $0)
+		print
+	}
+						    									 
+	/^ Album:/{
+		gsub(/^ Album: /, "ALBUM=", $0)
+		print
+	}
+						    												 
+	/^ Genre:/{
+		gsub(/^ Genre: /, "GENRE=", $0)
+		print
+		}
+						    															 
+	/^ Track:/{
+		gsub(/^ Track: /, "TRACKNUMBER=", $0)
+		split($0, track)
+		print track[1], "\nTRACKTOTAL="track[3]
+	}
+
+	/^ Disk:/{
+		gsub(/^ Disk: /, "DISCNUMBER=", $0)
+		print $1
+	}
+
+	/^ Comment:/{
+		gsub(/^ Comment: /, "COMMENT=", $0)
+		print
+	}
+ 
+ 	/^ Writer:/{
+		gsub(/^ Writer: /, "COMPOSER=", $0)
+		print
+	}
+
+	/^ Album Artist:/{
+	gsub(/^ Album Artist: /, "PERFORMER=", $0)
+	print
+	}'# | metaflac --import-tags-from=- "${2}"
+}
+
+apetags_convert() {
+	ffmpeg -i "${1}" 2>&1 | sed -n '/Metadata:/,/Duration:/p' |
+	awk 'BEGIN {
+		IGNORECASE=1
+	}
+
+		/^ +Year +:/{
+		    print "YEAR="$3
+		}
+		
+		/^ +Genre +:/{
+			gsub(/^ +Genre +: /, "GENRE=", $0)
+			print
+		}
+		
+		/^ +Album +:/{
+			gsub(/^ +Album +: /, "ALBUM=", $0)
+			print
+		}
+		
+		/^ +Comment +:/{
+			gsub(/^ +Comment +: /, "COMMENT=", $0)
+			print
+		}
+		
+		/^ +Title +:/{
+			gsub(/^ +Title +: /, "TITLE=", $0)
+			print
+		}
+		
+		/^ +Composer +:/{
+			gsub(/^ +Composer +: /, "COMPOSER=", $0)
+			print
+		}
+		
+		/^ +Artist +:/{
+			gsub(/^ +Artist +: /, "ARTIST=", $0)
+			print
+		}
+		
+		/^ +Part +:/{
+			gsub(/^ +Part +: /, "DISCNUMBER=", $0)
+			print
+		}' | metaflac --import-tags-from=- "${2}"
+}
+	 
+#. $HOME/aserv/conv.conf
+BASE_D=/media
+rel_path=`echo $1 |sed -n 's/.*\///p'`
+SYNC_D=`echo $1 |sed -n 's/.*\/S_//; s/\/.*$//p'`
+umount -l /mnt/CarAudio/$SYNC_D
+rmdir /mnt/CarAudio/$SYNC_D
+
+pushd $1
+#echo $1 >/media/store/RRS_conv/pth
+SZ=0
+NSZ=1
+while [[ "$SZ" -ne "$NSZ" ]]
+    do
+	SZ=`du -s|sed -n 's/\.*$//;s/ *$//p'`
+	sleep 5
+	sync
+	NSZ=`du -s|sed -n 's/\.*$//;s/ *$//p'`
+done
+        
+find . -type f ! -iname "*.wav" |
+    while read file
+	do
+	    [ -e "${file%.*}.wav" ] && say_exist || {
+		drs=${file%/*}
+		CUE_F=''
+		CUE_F=$(find "$drs" -maxdepth 1 -iname "*.cue" | head -n 1)
+		if [[ -n $CUE_F ]]
+			then
+			trk=$(grep -cw TRACK "$CUE_F") 
+			fls=$(grep -cw FILE "$CUE_F")
+			if [ $trk -gt $fls ]
+			    then
+				pushd "$drs"
+				cuesplit
+				popd
+		    	fi
+		fi
+	    }
+	done
+		
+		
+		
+find . -type f ! -iname "*.wav" |
+    while read file
+	do
+	    [ -e "${file%.*}.wav" ] && say_exist || {
+		nameF="$(basename "${file}")"
+		ext="${nameF##*.}"
+		fsr=`mediainfo "$file" |grep "Sampling rate" |sed -n 's/.*: //;s/\..*KHz//p'`                        	# Получим частоту дискретизации аудио
+#		echo $fsr
+		if [[ "$fsr" -gt "48" ]]; then
+#		    echo "Конвертируемся"
+		    sox "${file}" "tmp${nameF}" rate -v -L -b 90 48k && mv "tmp${nameF}" "${file}"			# Если 16 бит - просто режем
+		    mediainfo ${file}
+		fi
+		case "${ext}" in
+		    m4a)
+			chkdec alac-decoder mp4info "$file" && {
+			    say_work
+			    {
+				alac-decoder -f "${file%.m4a}.wav" "${file}" &&\
+				#m4atags_convert "${file}" "${file%.m4a}.wav"\
+				rm -f "${file}"
+			    } && say_complete || say_failed
+			}
+			;;
+		    flac)
+			    say_work
+			    {
+			    flac -d -f --totally-silent --delete-input-file "${file}" && rm -f "${file}"
+			    } && say_complete || say_failed
+			;;
+		    ape)
+			chkdec mac ffmpeg "$file" && {
+			    say_work
+			    {
+				mac "${file}" - -d 2>/dev/null | flac --best - --totally-silent -Vo "${file%.ape}.flac" &&\
+				apetags_convert "${file}" "${file%.ape}.flac" && rm -f "${file}"
+			    } && say_complete || say_failed
+			}
+			;;
+			wv)
+			    chkdec wvunpack ffmpeg "${file}" && {
+				say_work
+				{
+				    wvunpack "${file}" -qo - | flac --best - --totally-silent -Vo "${file%.wv}.flac" &&\
+				    apetags_convert "${file}" "${file%.wv}.flac" && rm -f "${file}"
+				} && say_complete || say_failed
+			}
+			;;
+		esac
+	}
+done
+sync
+
+what_car=`echo $1 |sed -n 's/.*media\///; s/\/.*$//p'`
+#_cnt=`du -s $BASE_D/$what_car |sed -n 's/\/.*//p'`
+#echo $_cnt > $BASE_D/$what_car/count_sz
+cd $1
+# Удаляем все старые ссылки
+rm -rf $BASE_D/$SYNC_D/$rel_path
+#mkdir /media/RS5/$rel_path
+# Пересоздаем новые ссылки для работы rsync
+ln -sf $1 $BASE_D/$SYNC_D
+#ln -sf $BASE_D/$what_car/count_sz $BASE_D/$SYNC_D
+# Здесь создаем маркер или удаляем маркер верхнего уровня каталога для отслеживания rsync уже на CarPc
+#if [[ -e "$BASE_D/$SYNC_D/sync" ]]; then rm -f $BASE_D/$SYNC_D/sync; else touch $BASE_D/$SYNC_D/sync; fi
+#if [[ -e "$BASE_D/S_$SYNC_D/sync" ]]; then rm -f $BASE_D/S_$SYNC_D/sync; else touch $BASE_D/S_$SYNC_D/sync; fi
+#if [[ -e "/mnt/CarAudio/$SYNC_D/sync" ]]; then rm -f /mnt/CarAudio/$SYNC_D/sync; else touch /mnt/CarAudio/$SYNC_D/sync; fi
+
+mkdir /mnt/CarAudio/$SYNC_D
+mount /mnt/CarAudio/$SYNC_D
+
+##################################### Устанавливаем флаг необходимости синхронизации ######################################
+echo out_of_sync > /opt/AP_server/share/$what_car/sync_state
+pushd /media/$what_car
+find -type f |sed -n 's/.*\///p'>/tmp/t123
+LC_ALL=C sort -d /tmp/t123 >/opt/AP_server/share/$what_car/list_fsync_local
+popd
+
+exit
+#cp -r ./* /media/RRS
+#rm -rf *
+#popd#!/bin/bash
+echo "/media/S_RRS/New" | 

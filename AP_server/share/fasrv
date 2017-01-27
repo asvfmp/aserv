@@ -1,0 +1,432 @@
+#!/bin/bash
+WP=$(cd `dirname $0` && pwd)
+
+
+
+source ./shellcurses
+#set -e
+#set -x
+#BL=12.40
+old_IFS=$IFS
+IFS=$'\n'
+for line in $(cat $WP/syncaserv.conf)
+    do
+	id=`echo $line |sed -n 's/=.*//p'`
+	case $id in
+	    BATT_Vn)
+		BL=`echo $line |sed -n 's/.*=//;s/ .*$//p'`
+	    ;;
+	    BATT_Vh)
+		BLh=`echo $line |sed -n 's/.*=//;s/ .*$//p'`
+	    ;;
+	    BATT_Vl)
+		BLl=`echo $line |sed -n 's/.*=//;s/ .*$//p'`
+	    ;;
+	    BATT_div)
+		BATT_div=`echo $line |sed -n 's/.*=//;s/ .*$//p'`
+	    ;;
+	    BATT_type)
+		BATT_type=`echo $line |sed -n 's/.*=//;s/ .*$//p'`
+	    ;;
+#	    C_SPEED)
+#		C_SPEED=`echo $line |sed -n 's/.*=//p'`
+#	    ;;
+#	    C_STATUS)
+#		C_STATUS=`echo $line |sed -n 's/.*=//p'`
+#	    ;;
+#	    S_LEVEL)
+#		S_LEVEL=`echo $line |sed -n 's/.*=//p'`
+#	    ;;
+#	    B_LEVEL)
+#		B_LEVEL=$(cat /tmp/cpc-cb/vb)
+#		B_LEVEL=`echo $line |sed -n 's/.*=//p'`
+#		B_LEVEL_raw=`echo $line |sed -n 's/.*=//p'`
+#		B_f=`echo $B_LEVEL |sed -n 's/..$//p'`
+#		B_d=`echo $B_LEVEL |sed -n 's/^..//p'`
+#		B_LEVEL=$B_f.$B_d
+#		B_LEVEL=`dc $B_LEVEL_raw 100 / p`
+#		B_LEVEL=`awk 'BEGIN {printf("%.2f\n","'"$B_LEVEL_raw"'"/"'"$BATT_div"'")}'`
+#		B_f=`echo $B_LEVEL |sed -n 's/\..*$//p'`
+#		B_d=`echo $B_LEVEL |sed -n 's/^.*\.//p'`
+#	    ;;
+#	    ACC)
+#		ACC=`echo $line |sed -n 's/.*=//p'`
+#	    ;;
+#	    A_USB_STATE)
+#		A_USB_STATE=`echo $line |sed -n 's/.*=//p'`
+#	    ;;
+#	    A_USB_S_STATE)
+#		A_USB_S_STATE=`echo $line |sed -n 's/.*=//p'`
+#	    ;;
+	esac
+    done
+IFS=$old_IFS
+
+C_STATUS="disconnected"
+C_PORT="not found"
+C_IFACE="X"
+S_LEVEL="  lost  "
+
+
+
+HEAD="Status of CarPc on host: "
+HEAD_PL="3 25"
+HEAD_B=80
+
+H_COMM_S="Controller port speed: "
+COMML=5
+COMMC=37
+COMMLEN=31
+H_COMM_S_PL="$COMML $COMMC"
+C_STATUS_PL="5 47"
+
+H_COMM_P="Controller port: "
+PORTL=5
+PORTC=3
+PORTLEN=31
+H_COMM_P_PL="$PORTL $PORTC"
+C_PORT_PL="5 23"
+
+H_BAT="Battery voltage,V: "
+HBL=6
+HBC=3
+HBLEN=31
+H_BAT_PL="$HBL $HBC"
+Vf=`echo $BL| sed -n 's/\..*//p'`
+Vd=`echo $BL| sed -n 's/.*\.//;s/ .*$//p'`
+BLn=`awk 'BEGIN {printf("%d\n","'"$BL"'"*"'"$BATT_div"'")}'` 					# Нормальное напряжение
+BLh=`awk 'BEGIN {printf("%d\n","'"$BLh"'"*"'"$BATT_div"'")}'` 					# Верхняя граница
+BLl=`awk 'BEGIN {printf("%d\n","'"$BLl"'"*"'"$BATT_div"'")}'` 					# Нижняя граница
+
+H_ACC="Ignition status: "
+IGL=6
+IGC=37
+IGLEN=31
+H_IG_PL="$IGL $IGC"
+
+H_IFACE="Connected interface: "
+IFL=7
+IFC=3
+IFLEN=31
+
+H_S_STR="Signal level : "
+SSL=7
+SSC=37
+SSLEN=31
+
+H_A_USB_STATE="USB connection: "
+AUSL=8
+AUSC=3
+AUSLEN=31
+
+H_A_USB_S_STATE="USB sync status: "
+AUSSL=8
+AUSSC=37
+AUSSLEN=31
+
+initscr								#Инициализация экрана
+#set -x
+clear
+#Инициализация экрана -отрисовка заголовков и заполнение первоначальных данных
+
+attrset dim
+mvaddstr $HEAD_PL "$HEAD"
+#mvaddstr $H_COMM_S_PL "$H_COMM_S"
+#mvaddstr $H_COMM_P_PL "$H_COMM_P"
+#mvaddstr $HEAD_IFACE_PL "$HEAD_IFACE"
+#mvaddstr $HEAD_S_STR_PL "$HEAD_S_STR"
+#addstr
+refresh
+
+while : 
+do
+old_IFS=$IFS
+IFS=$'\n'
+for line in $(cat /opt/AP_server/share/S_RRS/status)
+    do
+	id=`echo $line |sed -n 's/=.*//p'`
+	case $id in
+	    SHOST)
+		SHOST=`echo $line |sed -n 's/.*=//p'`
+	    ;;
+	    IFACE)
+		C_IFACE=`echo $line |sed -n 's/.*=//p'`
+	    ;;
+	    C_PORT)
+		C_PORT=`echo $line |sed -n 's/.*=//p'`
+	    ;;
+	    C_SPEED)
+		C_SPEED=`echo $line |sed -n 's/.*=//p'`
+	    ;;
+	    C_STATUS)
+		C_STATUS=`echo $line |sed -n 's/.*=//p'`
+	    ;;
+	    S_LEVEL)
+		S_LEVEL=`echo $line |sed -n 's/.*=//p'`
+	    ;;
+	    B_LEVEL)
+		B_LEVEL_raw=`echo $line |sed -n 's/.*=//p'`					# Читаем напряжение батареи ( умноженное на 100)
+		B_LEVEL=`awk 'BEGIN {printf("%.2f\n","'"$B_LEVEL_raw"'"/"'"$BATT_div"'")}'`	# делим на 100
+		B_f=`echo $B_LEVEL |sed -n 's/\..*$//p'`					# Получаем целую часть
+		B_d=`echo $B_LEVEL |sed -n 's/^.*\.//p'`					# Получаем дробную часть
+	    ;;
+	    ACC)
+		ACC=`echo $line |sed -n 's/.*=//p'`
+	    ;;
+	    A_USB_STATE)
+		A_USB_STATE=`echo $line |sed -n 's/.*=//p'`
+	    ;;
+	    A_USB_S_STATE)
+		A_USB_S_STATE=`echo $line |sed -n 's/.*=//p'`
+	    ;;
+	esac
+    done
+IFS=$old_IFS
+
+#set -e
+#clear
+#refresh
+#attrset 
+sleep 1
+attrset "setaf 2"
+mvaddstr 3 50 "$SHOST"
+attrset sgr0
+if [[ $C_STATUS == "connected" ]]
+    then
+	fld_len=$(($COMMC+$COMMLEN))
+	for (( ic=COMMC; ic <= fld_len; ic++ )); do mvaddch $COMML $ic ' ';done
+	mvaddstr $COMML $COMMC "$H_COMM_S"
+	islen=${#C_STATUS}
+	ic=$(($COMMC+$COMMLEN-$islen))
+	mvaddch $COMML $ic "["
+	attrset "setaf 2"
+	ic=$(($ic+1))
+	mvaddstr $COMML $ic "$C_STATUS"
+	ic=$(($ic+$islen))
+	attrset sgr0
+	mvaddch $COMML $ic "]"
+    else
+	fld_len=$(($COMMC+$COMMLEN))
+	for (( ic=COMMC; ic <= fld_len; ic++ )); do mvaddch $COMML $ic ' ';done
+	mvaddstr $COMML $COMMC "$H_COMM_S"
+	islen=${#C_STATUS}
+	ic=$(($COMMC+$COMMLEN-$islen))
+	mvaddch $COMML $ic "["
+	attrset "setaf 1"
+	ic=$(($ic+1))
+	mvaddstr $COMML $ic "$C_STATUS"
+	ic=$(($ic+$islen))
+	attrset sgr0
+	mvaddch $COMML $ic "]"
+fi
+
+if ! [[ $C_PORT == "not found" ]]
+    then
+	fld_len=$(($PORTC+$PORTLEN))
+	for (( ic=PORTC; ic <= fld_len; ic++ )); do mvaddch $PORTL $ic ' ';done
+	mvaddstr $PORTL $PORTC "$H_COMM_P"
+	islen=${#C_PORT}
+	ic=$(($PORTC+$PORTLEN-$islen))
+	mvaddch $PORTL $ic "["
+	attrset "setaf 2"
+	ic=$(($ic+1))
+	mvaddstr $PORTL $ic "$C_PORT"
+	ic=$(($ic+$islen))
+	attrset sgr0
+	mvaddch $PORTL $ic "]"
+    else
+	fld_len=$(($PORTC+$PORTLEN))
+	for (( ic=PORTC; ic <= fld_len; ic++ )); do mvaddch $PORTL $ic ' ';done
+	mvaddstr $PORTL $PORTC "$H_COMM_P"
+	islen=${#C_PORT}
+	ic=$(($PORTC+$PORTLEN-$islen))
+	mvaddch $PORTL $ic "["
+	attrset "setaf 1"
+	ic=$(($ic+1))
+	mvaddstr $PORTL $ic "$C_PORT"
+	ic=$(($ic+$islen))
+	attrset sgr0
+	mvaddch $PORTL $ic "]"
+fi
+
+# Скорость порта контроллера
+fld_len=$(($COMMC+$COMMLEN))
+for (( ic=COMMC; ic <= fld_len; ic++ )); do mvaddch $COMML $ic ' ';done
+mvaddstr $COMML $COMMC "$H_COMM_S"
+islen=${#C_SPEED}
+ic=$(($COMMC+$COMMLEN-$islen))
+mvaddch $COMML $ic "["
+if [[ $C_SPEED == "0" ]]; then attrset "setaf 1"; else attrset "setaf 2"; fi
+ic=$(($ic+1))
+mvaddstr $COMML $ic "$C_SPEED"
+ic=$(($ic+$islen))
+attrset sgr0
+mvaddch $COMML $ic "]"
+
+#Vbatt
+fld_len=$(($HBC+$HBLEN))
+for (( ic=HBC; ic <= fld_len; ic++ )); do mvaddch $HBL $ic ' ';done
+mvaddstr $HBL $HBC "$H_BAT"
+islen=${#B_LEVEL}
+#let islen=islen+1
+ic=$(($HBC+$HBLEN-$islen))
+mvaddch $HBL $ic "["
+attrset "setaf 2"								#Нормальное напряжение батареи
+if [[ "$B_LEVEL_raw" -le "$BLl" ]] || [[ "$B_LEVEL_raw" -gt "$BLh" ]]
+    then
+	attrset "setaf 1"
+elif [[ $B_LEVEL_raw -gt $BLl ]] && [[ $B_LEVEL_raw -lt $BLn ]]
+    then
+	attrset "setaf 3"
+fi
+ic=$(($ic+1))
+mvaddstr $HBL $ic "$B_LEVEL"
+ic=$(($ic+$islen))
+attrset sgr0
+mvaddch $HBL $ic "]"
+	
+if [[ "$ACC" == "ON" ]]
+    then
+	fld_len=$(($IGC+$IGLEN))
+	for (( ic=IGC; ic <= fld_len; ic++ )); do mvaddch $IGL $ic ' ';done
+	mvaddstr $IGL $IGC "$H_ACC"
+	islen=${#ACC}
+	ic=$(($IGC+$IGLEN-$islen))
+	mvaddch $IGL $ic "["
+	attrset "setaf 2"
+	ic=$(($ic+1))
+	mvaddstr $IGL $ic "$ACC"
+	ic=$(($ic+$islen))
+	attrset sgr0
+	mvaddch $IGL $ic "]"
+    else
+	fld_len=$(($IGC+$IGLEN))
+	for (( ic=IGC; ic <= fld_len; ic++ )); do mvaddch $IGL $ic ' ';done
+	mvaddstr $IGL $IGC "$H_ACC"
+	islen=${#ACC}
+	ic=$(($IGC+$IGLEN-$islen))
+	mvaddch $IGL $ic "["
+	attrset "setaf 1"
+	ic=$(($ic+1))
+	mvaddstr $IGL $ic "$ACC"
+	ic=$(($ic+$islen))
+	attrset sgr0
+	mvaddch $IGL $ic "]"
+fi
+
+if ! [[ "$C_IFACE" == "" ]]
+    then
+	fld_len=$(($IFC+$IFLEN))
+	for (( ic=IFC; ic <= fld_len; ic++ )); do mvaddch $IFL $ic ' ';done
+	mvaddstr $IFL $IFC "$H_IFACE"
+	islen=${#C_IFACE}
+	ic=$(($IFC+$IFLEN-$islen))
+	mvaddch $IFL $ic "["
+	attrset "setaf 2"
+	ic=$(($ic+1))
+	mvaddstr $IFL $ic "$C_IFACE"
+	ic=$(($ic+$islen))
+	attrset sgr0
+	mvaddch $IFL $ic "]"
+    else
+	fld_len=$(($IFC+$IFLEN))
+	for (( ic=IFC; ic <= fld_len; ic++ )); do mvaddch $IFL $ic ' ';done
+	mvaddstr $IFL $IFC "$H_IFACE"
+	islen=1
+	ic=$(($IFC+$IFLEN-$islen))
+	mvaddch $IFL $ic "["
+	attrset "setaf 1"
+	ic=$(($ic+1))
+	mvaddstr $IFL $ic "X"
+	ic=$(($ic+$islen))
+	attrset sgr0
+	mvaddch $IFL $ic "]"
+fi
+
+if  [[ $S_LEVEL == "wired" ]]
+    then
+	fld_len=$(($SSC+$SSLEN))
+	for (( ic=SSC; ic <= fld_len; ic++ )); do mvaddch $SSL $ic ' ';done
+	mvaddstr $SSL $SSC "$H_S_STR"
+	islen=${#S_LEVEL}
+	ic=$(($SSC+$SSLEN-$islen))
+	mvaddch $SSL $ic "["
+	attrset "setaf 2"
+	ic=$(($ic+1))
+	mvaddstr $SSL $ic "$S_LEVEL"
+	ic=$(($ic+$islen))
+	attrset sgr0
+	mvaddch $SSL $ic "]"
+    else
+	fld_len=$(($SSC+$SSLEN))
+	for (( ic=SSC; ic <= fld_len; ic++ )); do mvaddch $SSL $ic ' ';done
+	mvaddstr $SSL $SSC "$H_S_STR"
+	islen=${#S_LEVEL}
+	ic=$(($SSC+$SSLEN-$islen))
+	mvaddch $SSL $ic "["
+	attrset "setaf 3"
+	ic=$(($ic+1))
+	mvaddstr $SSL $ic "$S_LEVEL"
+	ic=$(($ic+$islen))
+	attrset sgr0
+	mvaddch $SSL $ic "]"
+fi
+
+# Статус соединения локального хранилища с хостом/автомобилем
+fld_len=$(($AUSC+$AUSLEN))
+for (( ic=AUSC; ic <= fld_len; ic++ )); do mvaddch $AUSL $ic ' ';done
+mvaddstr $AUSL $AUSC "$H_A_USB_STATE"
+islen=${#A_USB_STATE}
+ic=$(($AUSC+$AUSLEN-$islen))
+mvaddch $AUSL $ic "["
+ic=$(($ic+1))
+attrset "setaf 2"
+mvaddstr $AUSL $ic "$A_USB_STATE"
+ic=$(($ic+$islen))
+attrset sgr0
+mvaddch $AUSL $ic "]"
+
+# Статус синхронизации локального хранилища
+fld_len=$(($AUSSC+$AUSSLEN))
+for (( ic=AUSSC; ic <= fld_len; ic++ )); do mvaddch $AUSSL $ic ' ';done
+mvaddstr $AUSSL $AUSSC "$H_A_USB_S_STATE"
+islen=${#A_USB_S_STATE}
+ic=$(($AUSSC+$AUSSLEN-$islen))
+mvaddch $AUSSL $ic "["
+if [[ $A_USB_S_STATE == "synced" ]]; then attrset "setaf 2"; else attrset "setaf 1"; fi
+ic=$(($ic+1))
+mvaddstr $AUSSL $ic "$A_USB_S_STATE"
+ic=$(($ic+$islen))
+attrset sgr0
+mvaddch $AUSSL $ic "]"
+
+
+attrset sgr0
+refresh
+sleep 5
+#move 23 1
+#addch X
+#refresh
+#sleep 2
+#move 25 15
+#addch "Y"
+#refresh
+#sleep 2
+#mvaddstr 22 11 '____________________________________________'
+#refresh
+#sleep 4
+#move  35 1
+#addstr "Max lines: "
+#attrset "setaf 2"
+#addstr "$MAX_LINES"
+#attrset sgr0
+#refresh
+#sleep 2
+#move 35 16
+#addstr "Max columns: $MAX_COLS"
+#refresh
+#move 40 1
+#refresh
+#sleep 2
+endwin
+done
