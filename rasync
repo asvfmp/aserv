@@ -5,9 +5,9 @@ remote_SYNC ()
 consoleLog "[$FUNCNAME]: Проверка статуса синхронизации с сервером" $CONS
 ############################################# Проверка статуса синхронизации с сервером #################################################################
 port__SW $_conn 2
-rsync -rqztL --copy-unsafe-links --partial --size-only --modify-window=1 --timeout=5 --delete --password-file=/etc/rsyncd.scrt $R_USER@$R_SERV::$R_DIR_state/sync_state $WP/share/remotesync_state
+rsync -rqztL --copy-unsafe-links --partial --size-only --modify-window=1 --timeout=5 --delete --port=$R_PORT --password-file=/etc/rsyncd.scrt $R_USER@$R_SERV::$R_DIR_state/sync_state $WP/share/remotesync_state
 SYNC_FLAG=`cat $WP/share/remotesync_state`
-rsync -qzt --timeout=5 --password-file=/etc/rsyncd.scrt $WP/share/status $R_USER@$R_SERV::$R_DIR_state/status									# Отправляем файл статуса на удаленный сервер
+rsync -qzt --timeout=5 --port=$R_PORT --password-file=/etc/rsyncd.scrt $WP/share/status $R_USER@$R_SERV::$R_DIR_state/status									# Отправляем файл статуса на удаленный сервер
 port__SW $_conn 1
 if [[ $SYNC_FLAG == "sync" ]]; then consoleLog "[$FUNCNAME]: Локальное хранилище синхронизировано с сервером" $CONS; return 0; fi						# Если синхронизированно состояние - выход
 
@@ -69,7 +69,7 @@ fi
 		    echo performance > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
             	    start=$(date +%s)
 		    printf "\n"
-            	    rsync -rqztL --copy-unsafe-links --partial --size-only --modify-window=1 --timeout=5 --delete --password-file=/etc/rsyncd.scrt $R_USER@$R_SERV::$R_DIR/ $SMNT_P	# Синхронизируем каталог с удаленным сервером
+            	    rsync -rqztL --copy-unsafe-links --partial --size-only --modify-window=1 --timeout=5 --delete --port=$R_PORT --password-file=/etc/rsyncd.scrt $R_USER@$R_SERV::$R_DIR/ $SMNT_P	# Синхронизируем каталог с удаленным сервером
 		    if [[ $? == 0 ]]; then 
 			echo out_of_sync > $WP/share/playsync_state
 		    else
@@ -80,12 +80,12 @@ fi
 		    find . -type f |sed -n 's/.*\///p'>$TMPD/fl
 		    LC_ALL=C sort -d $TMPD/fl >$WP/share/list_fsync
 		    popd 2>&1 >/dev/null
-            	    rsync -qzt --timeout=5 --password-file=/etc/rsyncd.scrt $WP/share/list_fsync $R_USER@$R_SERV::$R_DIR_state/list_fsync_remote					# Отправляем список файлов после синхронизации на сервер
+            	    rsync -qzt --timeout=5 --port=$R_PORT --password-file=/etc/rsyncd.scrt $WP/share/list_fsync $R_USER@$R_SERV::$R_DIR_state/list_fsync_remote					# Отправляем список файлов после синхронизации на сервер
 #            	    rsync -qzt --timeout=5 --password-file=/etc/rsyncd.scrt $WP/share/status $R_USER@$R_SERV::$R_DIR_state/status							# Отправляем файл статуса на удаленный сервер
 ################################################################################################################################################################################
 		    echo powersave > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
 # Тут будем обновлять софт и конфигурационные файлы
-		    rsync -rqzt --delete --port=8730 --password-file=/etc/rsync.scrt $R_USER@$R_SERV::$R_PKG/ $PKG_H 2>&1 > /var/log/rsync.log						# Синхронизируем пакет и настройки
+		    rsync -rqzt --delete --port=$R_PORT --password-file=/etc/rsync.scrt $R_USER@$R_SERV::$R_PKG/ $PKG_H 2>&1 > /var/log/rsync.log						# Синхронизируем пакет и настройки
 
             	    end=$(date +%s)
 		    port__SW $_conn 1
