@@ -1,0 +1,123 @@
+cuesplit() {
+##!/bin/bash
+#
+# расчленяет огромный lossless файл на FLAC члены по меткам треков из CUE
+# использование: запустить в той директории, где хранятся CUE и lossless файл
+#
+
+# немножко цвета
+RED='\e[1;31m'
+GREEN='\e[1;32m'
+BLUE='\e[1;34m'
+NC='\e[0m'              # отмена цвета
+
+INPUT=${PWD}        # нормальные люди называют папку именем исполнителя/альбома
+#INPUT=${PWD##*/}        # нормальные люди называют папку именем исполнителя/альбома
+
+# функция оповещает об успехе последней операции, и при отсутствие его,
+# произносится заклинание Avada Kedavra, затея умирает с правильным exit status
+success(){
+if (($1))
+        then
+                # отличное место дабы прикручивать логи вроде echo $INPUT >> fail.log
+                echo -e "Bad news, Harry, ${BLUE}$2${NC} goes ${RED}wrong!${NC} "
+#                notify-send --icon=gtk-no "Fail" "at $2"
+                return $1
+fi
+        echo -e "Harry, at ${BLUE}$2${NC} is ${GREEN}all ok!${NC} "
+}
+
+# несколько пустых тэгов, ничего особенного
+GENRE=""
+DATE=""
+
+# найдёт CUE файл разметки
+CUEFILE=$(find . -maxdepth 1 -iname "*.cue" | head -n 1)
+echo -e "${BLUE}$CUEFILE${NC} "
+
+# перекодирует CUE файл в UTF8
+#enconv -L ru -x UTF8 "$CUEFILE"
+#enconv -L ru -x CP1251 "$CUEFILE"
+success $? enconv
+
+# грязный хак чтоб получить жанр и год из CUE файла. а всё потому,
+# что cuetag.sh (а точнее cueprint) не работает должным образом,
+# а мейнтермеру всё равно. такие дела.
+parsecue(){
+        GENRE=$(head -n 6 "$CUEFILE" | grep -i GENRE | sed "s/REM GENRE //i" )
+        DATE=$(head -n 6 "$CUEFILE" | grep -i "DATE" | sed "s/REM DATE //i" )
+}
+
+# найдём и запомним APE/FLAC/WV файл, это самый толстый
+BIGONE=$(ls -S | grep -i --regex="\.ape\|\.flac\|\.wv" | head -n 1)
+if [ -n "$BIGONE" ]
+        then
+                # распилим его на отдельные FLAC части
+		bd=`mediainfo "$BIGONE" |grep "Bit depth" |sed -n 's/.*: //;s/ bits//p'`			# Получим разрядность аудио
+#		mediainfo "$BIGONE" |grep "Bit depth" |sed -n 's/.*: //;s/ bits//p'
+#		echo $bd
+                if [[ "$bd" -eq "16" ]]; then									# Если 16 бит - просто режем
+#        	    echo "Ok 16 bit"
+        	    cuebreakpoints "$CUEFILE" | shnsplit -o flac "$BIGONE"
+        	    success $? shnsplit
+                else
+        	    cuebreakpoints "$CUEFILE" |sed s/$/0/ | shnsplit -o flac "$BIGONE"				# Если нет то правим фрейм в вид nnn (маленький хак из интернета)
+        	fi
+        else
+                # файла нет, плохие новости
+#                notify-send --icon "gtk-no" "No Audiofile to Split" "${PWD##*/}"
+                return 1
+fi
+
+# проставим тэги из CUE в новые FLAC части, магия.
+cuetag "$CUEFILE" split-track*.flac ;
+success $? cuetag
+
+# напарсим не хватающих тэгов жанра и года выпуска из CUE файла.
+parsecue
+success $? parsecue
+
+# приберёмся
+rm -f "$BIGONE"
+rm -f *.log
+rm -f *.cue
+#mkdir .log
+#mv *?.log .log
+#mv *.cue .log
+success $? cleanup
+
+
+# впишем тэги и приведём имена файлов нарезанных частей в человеческий вид
+for SLICE in split-track*.flac; do
+        metaflac --set-tag "GENRE=$GENRE" --set-tag "DATE=$DATE" "$SLICE"
+        ARTIST=$(metaflac "$SLICE" --show-tag=ARTIST | sed s/.*=//g)
+        TITLE=$(metaflac "$SLICE" --show-tag=TITLE | sed s/.*=//g)
+        TRACKNUMBER=$(metaflac "$SLICE" --show-tag=TRACKNUMBER | sed s/.*=//g)
+        mv "$SLICE" "`printf %02g $TRACKNUMBER` - $ARTIST - $TITLE.flac"               
+done
+success $? rename
+
+# вкусняшки для глаз: найдём все маленькие картинки и сохраним их имена в /tmp/flac_icons
+COUNT=$(find . -size -300k -iname "*.png" -o -size -300k -name "*.jpg" | tee /tmp/flac_icons | wc -l)
+if (($COUNT))
+        then           
+                # возможно есть изображение с названием front? возьмём его на заметку
+                ICONfile=$(grep -m 1 -i front /tmp/flac_icons)
+                # нет ?
+                if (($?))      
+                         then
+                                # тогда возьмём случайную
+                                ICONfile=$(cat /tmp/flac_icons | awk NR==$((($RANDOM % $COUNT)+1)) )
+                fi
+                # добавим путь
+                ICON=$PWD/${ICONfile#*/}
+        # что, совсем ни одной нету? в эфир пойдёт стандартный символ
+        else                   
+                ICON=gtk-yes
+fi
+
+# хорошо постарались, о чём и напомним.
+#notify-send --icon "$ICON" "Ready" "$INPUT"
+
+#return 0
+}

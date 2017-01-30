@@ -1,0 +1,11 @@
+#!/bin/bash
+#echo $1 >/opt/AP_server/pt
+what_car=`echo $1 | sed -n 's/.*asrv\/\.*//;s/\/.*$//p'`
+#echo $what_car >/opt/AP_server/wca
+pushd /mnt/asrv/$what_car/state								# Переходим в каталог состояния клиента
+#pushd $1
+cmp list_fsync_local list_fsync_remote								# Проверяем статус синхронизации сравнивая списки файлов
+if [[ "$?" -eq "0" ]]; then echo "sync" >sync_state; fi						# Устанавливаем статус синхронизации
+popd
+
+exit
